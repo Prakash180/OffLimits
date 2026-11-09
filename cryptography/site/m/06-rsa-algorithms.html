@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 06 — RSA Algorithms (RS256 / RS384 / RS512) · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html" class="active"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>06 · Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#60a5fa,#2563eb)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#60a5fa;border-color:#60a5fa55;background:#60a5fa11">Module 06</span>
+  <h1 style="margin-top:18px">Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>RSA signing rests on a <strong>trapdoor function</strong>: multiplying two large primes is trivial, but factoring the product back into those primes is computationally infeasible. Your key pair is two views of that same secret number. The <strong>private key</strong> knows the factors (and a derived "private exponent" <code>d</code>); the <strong>public key</strong> only knows the product <code>n</code> and a small "public exponent" <code>e</code> (almost always 65537). Anyone can run the easy direction; only the private-key holder can run the hard direction. That one-way asymmetry is the whole game — and it's why you can publish the public key to the entire internet without ever risking forgery.</p>
+<p>When PyJWT signs with <code>RS256</code>, it does <strong>not</strong> encrypt your payload. It builds the signing input <code>base64url(header) + "." + base64url(payload)</code>, hashes that with SHA-256, wraps the digest in <strong>PKCS#1 v1.5 padding</strong> (a fixed, deterministic byte template), and then applies the private-key trapdoor to the padded block. The result is the signature — the third segment of the JWT. Because the padding is fixed, RS256 is <strong>fully deterministic</strong>: the same payload and key always produce byte-for-byte the same token.</p>
+<p>Verification reverses it: the public key transforms the signature back into the padded digest, the verifier independently re-hashes the header+payload it received, re-applies the same padding template, and checks for an exact match. If even one bit of the header or payload was tampered with, the recomputed digest won't match and PyJWT raises <code>InvalidSignatureError</code>. Notice what the signature size tracks: it equals the <strong>modulus size</strong>, not the hash. A 2048-bit key produces a 256-byte signature whether you choose <code>RS256</code>, <code>RS384</code>, or <code>RS512</code> — the hash choice only changes which SHA digest gets padded inside.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Think of a <strong>wax seal pressed by a signet ring</strong>. The ring (private key) is unique and you never let it leave your hand. The imprint it leaves (signature) can be examined by anyone holding a reference photo of your seal (public key) — they can confirm "yes, this is genuinely her ring" — but no amount of staring at the photo lets them carve a matching ring of their own.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>rsa.generate_private_key(public_exponent=65537, key_size=2048)</code> picks two ~1024-bit primes and derives the private exponent <code>d</code> and modulus <code>n</code>.</li>
+<li><code>private_key.public_key()</code> strips away the secret factors, keeping only <code>(n, e)</code> — the safely shareable half.</li>
+<li><code>jwt.encode(payload, private_key, algorithm="RS256")</code> SHA-256-hashes the <code>header.payload</code> string, applies PKCS#1 v1.5 padding, and runs the private-key trapdoor to produce the 256-byte signature.</li>
+<li>The three base64url segments are joined with dots into the final token string.</li>
+<li><code>jwt.decode(token, public_key, algorithms=["RS256"])</code> re-hashes the received header+payload and uses the public key to confirm the signature wraps that exact digest.</li>
+<li>A match returns the claims dict; any mismatch raises <code>InvalidSignatureError</code>.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>02_rs256_sign_verify.py</code>, signing uses <code>private_key</code> and decoding uses <code>public_key</code> — <strong>two different objects</strong>, the heart of asymmetric crypto.</li>
+<li>In <code>03_rs384_rs512.py</code>, the signature length stays <strong>256 bytes</strong> across all three RS variants — proof that size follows the key, not the hash.</li>
+<li>In <code>04_private_signs_public_verifies.py</code>, handing the public key to <code>jwt.encode</code> fails: it simply has no signing material.</li>
+<li>In <code>05_wrong_public_key_fails.py</code>, a foreign but perfectly valid public key still yields <code>InvalidSignatureError</code> — only the <strong>paired</strong> key validates.</li>
+<li>In <code>07_key_sizes.py</code>, the 3072-bit key is noticeably slower to generate and produces a larger 384-byte signature.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"RSA encrypts the JWT."</strong> No — it <em>signs</em>. The payload stays fully readable via base64url decode; signing only proves authenticity and integrity.</li>
+<li><strong>"The number in RS256 is the key size."</strong> It's the <strong>SHA hash</strong> (256/384/512). Key size is chosen separately at generation (2048, 3072, …).</li>
+<li><strong>"Bigger hash means bigger signature."</strong> Signature size equals the modulus length; the hash only changes the digest padded inside it.</li>
+<li><strong>"The public key is a secondary secret."</strong> It's meant to be published (via JWKS). Its safety to share is the entire point of going asymmetric.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-06-rsa-algorithms-rs256-rs384-rs512">🗝️ Module 06 — RSA Algorithms (<code>RS256</code> / <code>RS384</code> / <code>RS512</code>)</h1>
+<blockquote>
+<p>The asymmetric family. A <strong>private</strong> key signs; a <strong>public</strong> key verifies.
+Publish the public key to the whole world and they can confirm your tokens
+are genuine — yet <strong>none of them can forge one</strong>. This is the foundation of
+OAuth2 / OpenID Connect.</p>
+</blockquote>
+<hr />
+<h2 id="why-asymmetric-signing-matters">🧠 Why asymmetric signing matters</h2>
+<p>HMAC (Module 05) uses one shared secret, so <em>verify == sign</em>. That breaks down
+the moment you need <strong>untrusted third parties</strong> to verify tokens without being
+able to mint their own.</p>
+<p>RSA solves this with a <strong>key pair</strong>:</p>
+<ul>
+<li>🔒 <strong>Private key</strong> — kept secret. <strong>Signs</strong> tokens. Never leaves the issuer.</li>
+<li>🌍 <strong>Public key</strong> — shared freely. <strong>Verifies</strong> tokens. Cannot sign.</li>
+</ul>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    subgraph Issuer [&quot;Issuer (e.g. OAuth provider)&quot;]
+        PK[Private key 🔒]
+    end
+    PK -- &quot;sign&quot; --&gt; JWT[JWT]
+    JWT -- &quot;verify&quot; --&gt; V1[Service A 🌍]
+    JWT -- &quot;verify&quot; --&gt; V2[Service B 🌍]
+    JWT -- &quot;verify&quot; --&gt; V3[Mobile app 🌍]
+    PUB[Public key 🌍] -. &quot;distributed via JWKS&quot; .-&gt; V1
+    PUB -.-&gt; V2
+    PUB -.-&gt; V3</div></div>
+<p>Anyone with the public key can verify; only the holder of the private key can
+sign. That asymmetry is what makes federated identity possible.</p>
+<blockquote>
+<p>🔐 <strong>Naming note:</strong> <code>RS</code> = <strong>R</strong>SASSA-PKCS1-v1_5 + <strong>S</strong>HA. So <code>RS256</code> =
+RSASSA-PKCS1-v1_5 signatures using SHA-256. The number is the hash; the
+signature <em>size</em> is governed by the <strong>key size</strong> (2048-bit key → 256-byte
+signature), not the hash.</p>
+</blockquote>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it shows</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><a href="#ex-01_generate_rsa_keypair">01_generate_rsa_keypair.py</a></td>
+<td>Generate RSA-2048; serialize private (PKCS#8) &amp; public (SPKI) PEM</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/01_generate_rsa_keypair.py</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><a href="#ex-02_rs256_sign_verify">02_rs256_sign_verify.py</a></td>
+<td>Sign with private key, verify with public (<code>RS256</code>)</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/02_rs256_sign_verify.py</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><a href="#ex-03_rs384_rs512">03_rs384_rs512.py</a></td>
+<td>The <code>RS384</code> and <code>RS512</code> variants</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/03_rs384_rs512.py</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><a href="#ex-04_private_signs_public_verifies">04_private_signs_public_verifies.py</a></td>
+<td>Public key verifies but <strong>cannot</strong> sign</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/04_private_signs_public_verifies.py</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><a href="#ex-05_wrong_public_key_fails">05_wrong_public_key_fails.py</a></td>
+<td>A mismatched public key → <code>InvalidSignatureError</code></td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/05_wrong_public_key_fails.py</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><a href="#ex-06_load_keys_from_pem">06_load_keys_from_pem.py</a></td>
+<td>Write PEMs to temp files, reload with <code>load_pem_*</code></td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/06_load_keys_from_pem.py</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><a href="#ex-07_key_sizes">07_key_sizes.py</a></td>
+<td>2048 vs 3072-bit: security/perf tradeoff</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/07_key_sizes.py</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><a href="#ex-08_rsa_vs_hmac_when_to_use">08_rsa_vs_hmac_when_to_use.py</a></td>
+<td>HMAC vs RSA side by side — when to pick which</td>
+<td><code>.venv/bin/python pyjwt-course/06-rsa-algorithms/08_rsa_vs_hmac_when_to_use.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run them all:</p>
+<div class="codehl"><pre><span></span><code><span class="c1"># from the repo root: /home/astro/catalyst/jwt-test</span>
+<span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/06-rsa-algorithms/*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="sign-verify-at-a-glance">🔄 Sign / verify at a glance</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">sequenceDiagram
+    participant I as Issuer
+    participant T as JWT
+    participant V as Verifier
+    I-&gt;&gt;T: jwt.encode(payload, PRIVATE_KEY, &quot;RS256&quot;)
+    Note over I,T: only the private key can produce this signature
+    T-&gt;&gt;V: token travels over the wire
+    V-&gt;&gt;V: jwt.decode(token, PUBLIC_KEY, algorithms=[&quot;RS256&quot;])
+    Note over V: public key proves authenticity,&lt;br/&gt;cannot mint new tokens</div></div>
+<hr />
+<h2 id="pem-key-formats-youll-see">🧩 PEM key formats you'll see</h2>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>PyJWT/cryptography format</th>
+<th>PEM header</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Private</td>
+<td>PKCS#8 (<code>PrivateFormat.PKCS8</code>)</td>
+<td><code>-----BEGIN PRIVATE KEY-----</code></td>
+</tr>
+<tr>
+<td>Public</td>
+<td>SubjectPublicKeyInfo (<code>PublicFormat.SubjectPublicKeyInfo</code>)</td>
+<td><code>-----BEGIN PUBLIC KEY-----</code></td>
+</tr>
+</tbody>
+</table>
+<p>PyJWT happily accepts <strong>either</strong> raw PEM strings/bytes <strong>or</strong> <code>cryptography</code>
+key objects in <code>jwt.encode</code> / <code>jwt.decode</code>.</p>
+<hr />
+<h2 id="key-takeaways">✨ Key takeaways</h2>
+<ul>
+<li><strong>Private signs, public verifies.</strong> The public key can be published; it
+  enables verification, never forgery.</li>
+<li><strong>Signature size = key size / 8.</strong> A 2048-bit key always yields a 256-byte
+  signature regardless of <code>RS256</code>/<code>384</code>/<code>512</code>.</li>
+<li><strong>Wrong/foreign public key ⇒ <code>InvalidSignatureError</code>.</strong> Only the paired key
+  validates.</li>
+<li><strong>2048-bit is the modern minimum.</strong> 3072-bit adds margin at a CPU cost; keys
+  under 2048 are considered weak.</li>
+</ul>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li>🚫 <strong>Leaking the private key.</strong> Game over — anyone can forge. Store it in a
+  secret manager / HSM, never in source control.</li>
+<li>🚫 <strong>Confusing the keys.</strong> Sign with <strong>private</strong>, verify with <strong>public</strong>.
+  Handing <code>jwt.encode</code> a public key fails (it has no signing material).</li>
+<li>🚫 <strong>Trusting the header's <code>alg</code>.</strong> Always pin accepted algorithms in
+  <code>algorithms=[...]</code>; never let a token dictate <code>none</code> or downgrade you from
+  <code>RS256</code> to <code>HS256</code>.</li>
+<li>🚫 <strong>Unencrypted private PEMs in transit.</strong> The demo uses <code>NoEncryption()</code>
+  for clarity; protect real private keys at rest.</li>
+</ul>
+<hr />
+<h2 id="next">➡️ Next</h2>
+<p>RSA's <code>RS*</code> family uses deterministic PKCS#1 v1.5 padding. The next modules
+explore <strong>ECDSA</strong> (smaller keys, same asymmetric model) and <strong>RSA-PSS</strong> (<code>PS*</code>,
+randomized padding). See <a href="07-ecdsa-algorithms.html">Module 07 — ECDSA</a> and
+<a href="08-rsa-pss-algorithms.html">Module 08 — RSA-PSS</a>.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_generate_rsa_keypair" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Generate RSA Keypair</b><span>01_generate_rsa_keypair.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01_generate_rsa_keypair.py — Create an RSA-2048 keypair and serialize it.</p>
+<p>RSA is an <em>asymmetric</em> algorithm: you get a PAIR of keys.
+  - PRIVATE key: kept secret; used to SIGN tokens.
+  - PUBLIC key:  shared freely; used to VERIFY tokens.</p>
+<p>To move keys between systems we serialize them to PEM text:
+  - Private key -&gt; PKCS#8 PEM  ("-----BEGIN PRIVATE KEY-----")
+  - Public key  -&gt; SubjectPublicKeyInfo PEM ("-----BEGIN PUBLIC KEY-----")</p>
+<p>This script generates a fresh 2048-bit keypair entirely in memory (no network,
+no files) and prints both PEMs so you can see exactly what they look like.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_generate_rsa_keypair.py</span></div><pre>=== PRIVATE KEY (PKCS#8 PEM) — keep this SECRET ===
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMaSOjn3n20CE9
+pKygNoQeLW0rhEvnY9bpkJXrcDvDuDZT6mFoR+zZse0+xSUgQJEu1fgs8GwuLwaW
+vIyv6qtIMh0W4zF0mc9yKVNxpkbR0XCouH1K/mzDGFOAGDsdkpr+tcPPjqW6m3YI
+u2nMgsI/+SLNTeqL352GOGHndy7KddWxpQfa64Tm6qVr3KcvMINNimuC9P9ewWfR
+pxfcWJUwBJLrHDOFsOu5l/uG7h4FH03kGnXxh+B9u5GimXZ39wBl9DU0S2dVdK3n
+leE7chluhQl3FmIjh4TrsXD9fNQ8rERTThTEOAFVWcDh6AwVg+HcsgN0QDGTUA4p
+k66X3glbAgMBAAECggEARcVPYl6hUTLqXbGTMJ5bCzfjLvrZs7Ha3d85pOKqq5v5
+gzwZonAGcqnuOkItcWxIge2L577qlfr8K0BRXwxhCWP9lN3YeB219pgPgNfKDX0J
+ELXkIlBkjFUFz0+2AdqUKAOfwf1FKUQ+Di32J1WsewyNKfmB6NtbV8Bv/oMqR/VC
+xVXy0l2KZKuLJKLPR2g6TbjqDAPOkE6O2pwo+m7hsEAf+naqaFPDsrKY5Ov1sRzA
+ob2jlFwQ/FAgnTm0jo2b81HDv7qLZZ9ZeLAmW3sJyd/1RDMGXBi9Is2KsAeKdeVe
+FRC6ZVsrnm+i7zJdPxPqnwOHGs9qRFCQ1L/vDxus9QKBgQD530UA+d6SRiR61zid
+GJllO1qKSHOLblfEPiFI+PdfdWoBRGbkqnQ/Yu6LChmC82g14AL83eLfywZotcPT
+eaa6hzh5dQo8C7hZgG8iKM/5YUgH3nq/cPNMDP4RVS7GAA7VhcXCixehTsxA+PqI
+I+jR8fbXnAVxk2HlvPfsYyhqRQKBgQDRbHTpIF3vYZX+ip3B7izZsVsFa+Z7IWXg
+spOEag/Vt3hgfeh+VSHnsDb33DyBg3n5OEeXioTei1yCMPPCnFOqhDgUPTSf9wmS
+KS+DF6z3KDKqMgCGyiQxUnBohp3N53jxgd8kiAnzWFAEdT273cVos5MHkBRgenzX
+igFj/0SvHwKBgCF4uhqeXiVEBiD6cZgBspKv97nsaKX12wXruLO4vhJofRG8Yvgg
+qT/QddnkOXSkPIJzBpNu+bQ20x31s0zB0AbOlE8Y0Y0nmMNMhBaUVv+1+1sqf1Dj
+xYObffE+cuyNF2+c4tfjn/+4uX2+nHjeLpLpEcLiIIyNTKDkxmVBByntAoGATvbN
+EkYBBUzPaL3NhB0RTjgAcQfhTNYn+tR6qPfw5o2aVw/ChTgGY7zezRB+w/rWF/Fv
+lSVGuj7j77cTgnK9XVMjbgYx/IsCUdkzsANSVZMTn3bhGfHIOcyy08bGY6f+w1lL
+0RN2ZQoMidHHKDoTwEnNi5F5DXPB9Od1ZMYQmNMCgYEA1Zam8Ja2rd6kGmOArKkD
+U9rdV2TmeaJh4xnxK7LtOBMe+Uk9Uw4E08k5466gpTuQsIOnHgfMXAkpUDJ3ohpA
+XEew7Z+ZhBVSoLDsrT3rUNn49ESXFobYe6Wdeyy2ed9Y74l455nOuQYIux0ZIzYc
+U+JDSIWaZ3gdxxvfE31H018=
+-----END PRIVATE KEY-----
+
+=== PUBLIC KEY (SubjectPublicKeyInfo PEM) — safe to share ===
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzGkjo5959tAhPaSsoDaE
+Hi1tK4RL52PW6ZCV63A7w7g2U+phaEfs2bHtPsUlIECRLtX4LPBsLi8GlryMr+qr
+SDIdFuMxdJnPcilTcaZG0dFwqLh9Sv5swxhTgBg7HZKa/rXDz46lupt2CLtpzILC
+P/kizU3qi9+dhjhh53cuynXVsaUH2uuE5uqla9ynLzCDTYprgvT/XsFn0acX3FiV
+MASS6xwzhbDruZf7hu4eBR9N5Bp18YfgfbuRopl2d/cAZfQ1NEtnVXSt55XhO3IZ
+boUJdxZiI4eE67Fw/XzUPKxEU04UxDgBVVnA4egMFYPh3LIDdEAxk1AOKZOul94J
+WwIDAQAB
+-----END PUBLIC KEY-----
+
+Key size (bits): 2048</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_generate_rsa_keypair.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01_generate_rsa_keypair.py — Create an RSA-2048 keypair and serialize it.</span>
+
+<span class="sd">RSA is an *asymmetric* algorithm: you get a PAIR of keys.</span>
+<span class="sd">  - PRIVATE key: kept secret; used to SIGN tokens.</span>
+<span class="sd">  - PUBLIC key:  shared freely; used to VERIFY tokens.</span>
+
+<span class="sd">To move keys between systems we serialize them to PEM text:</span>
+<span class="sd">  - Private key -&gt; PKCS#8 PEM  (&quot;-----BEGIN PRIVATE KEY-----&quot;)</span>
+<span class="sd">  - Public key  -&gt; SubjectPublicKeyInfo PEM (&quot;-----BEGIN PUBLIC KEY-----&quot;)</span>
+
+<span class="sd">This script generates a fresh 2048-bit keypair entirely in memory (no network,</span>
+<span class="sd">no files) and prints both PEMs so you can see exactly what they look like.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="c1"># --- Generate the keypair ------------------------------------------------</span>
+<span class="c1"># public_exponent=65537 is the standard, recommended choice.</span>
+<span class="c1"># key_size=2048 is the modern minimum for RSA.</span>
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>  <span class="c1"># derived from the private key</span>
+
+<span class="c1"># --- Serialize the PRIVATE key to PKCS#8 PEM -----------------------------</span>
+<span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+    <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+    <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+    <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>  <span class="c1"># unencrypted for the demo</span>
+<span class="p">)</span>
+
+<span class="c1"># --- Serialize the PUBLIC key to SubjectPublicKeyInfo PEM ----------------</span>
+<span class="n">public_pem</span> <span class="o">=</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+    <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+    <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== PRIVATE KEY (PKCS#8 PEM) — keep this SECRET ===&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">private_pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== PUBLIC KEY (SubjectPublicKeyInfo PEM) — safe to share ===&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">public_pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Key size (bits):&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">key_size</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/01_generate_rsa_keypair.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_rs256_sign_verify">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>RS256 Sign Verify</b><span>02_rs256_sign_verify.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02_rs256_sign_verify.py — Sign with the private key, verify with the public.</p>
+<p>RS256 = "RSASSA-PKCS1-v1_5 using SHA-256".</p>
+<p>The whole point of RSA for JWTs:
+  - The Issuer SIGNS with its PRIVATE key (which it never shares).
+  - Anyone holding the PUBLIC key can VERIFY, but cannot forge new tokens.</p>
+<p>PyJWT accepts either PEM bytes/strings OR cryptography key objects. Here we
+pass the cryptography key objects directly for simplicity.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_rs256_sign_verify.py</span></div><pre>Encoded JWT (RS256):
+eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRhIiwicm9sZSI6ImFkbWluIn0.ZLwTnsisjmUtJB4XvqmV-jvPAq_JsmxjTZGUAVIN-zGSH_7s_wKgyUhZ7W_SZYeJIgr0Yq26OfpByxoHLdGkzSd-kkDZlN0qzQjH-SHwwaqCcAQ8wa_4C4Dw2alsKPWTmpMTOdCV-daSiIoACw6RNE8RYV0tRZC8bsg615f_2BcSa18QJMz2Duh5Zex3zMAUJxPN2hWlrZO4joEvJAyZmZwjz4ykZEhhf_OjnFj1yDpTzM3f8QialtbDvLMZzu0KHrYirOe86qr2_zpVyzF87lWV_5PtCq3-DxsFT5h1cIqHm2stGpftqL4EEc_mf1RBCeBZeBvJW55nU_WPXY5yYw
+
+Algorithm in header (alg): RS256
+
+Decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_rs256_sign_verify.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02_rs256_sign_verify.py — Sign with the private key, verify with the public.</span>
+
+<span class="sd">RS256 = &quot;RSASSA-PKCS1-v1_5 using SHA-256&quot;.</span>
+
+<span class="sd">The whole point of RSA for JWTs:</span>
+<span class="sd">  - The Issuer SIGNS with its PRIVATE key (which it never shares).</span>
+<span class="sd">  - Anyone holding the PUBLIC key can VERIFY, but cannot forge new tokens.</span>
+
+<span class="sd">PyJWT accepts either PEM bytes/strings OR cryptography key objects. Here we</span>
+<span class="sd">pass the cryptography key objects directly for simplicity.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="c1"># --- One keypair -------------------------------------------------------</span>
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+<span class="c1"># --- Sign with the PRIVATE key ------------------------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded JWT (RS256):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Algorithm in header (alg):&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">])</span>  <span class="c1"># -&gt; &quot;RS256&quot;</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Verify with the PUBLIC key -----------------------------------------</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Decoded payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/02_rs256_sign_verify.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_rs384_rs512">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>RS384 RS512</b><span>03_rs384_rs512.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03_rs384_rs512.py — The other RSA/SHA-2 variants: RS384 and RS512.</p>
+<p>Just like the HMAC family had HS256/384/512, the RSA family has:
+  RS256 -&gt; RSASSA-PKCS1-v1_5 + SHA-256
+  RS384 -&gt; RSASSA-PKCS1-v1_5 + SHA-384
+  RS512 -&gt; RSASSA-PKCS1-v1_5 + SHA-512</p>
+<p>The KEY stays the same; only the hash used inside the signature changes.
+Note that, unlike HMAC, the RSA signature length is governed by the KEY SIZE
+(2048-bit key -&gt; 256-byte signature), not by the hash — so all three produce
+the same signature size for a given key.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_rs384_rs512.py</span></div><pre>--- RS384 ---
+  header alg: RS384
+  signature size (bytes): 256 (= key size / 8)
+  decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+
+--- RS512 ---
+  header alg: RS512
+  signature size (bytes): 256 (= key size / 8)
+  decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+
+With RSA the signature size tracks the KEY size (2048 bits -&gt; 256 bytes),
+not the hash size — that is the big difference from the HMAC family.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_rs384_rs512.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03_rs384_rs512.py — The other RSA/SHA-2 variants: RS384 and RS512.</span>
+
+<span class="sd">Just like the HMAC family had HS256/384/512, the RSA family has:</span>
+<span class="sd">  RS256 -&gt; RSASSA-PKCS1-v1_5 + SHA-256</span>
+<span class="sd">  RS384 -&gt; RSASSA-PKCS1-v1_5 + SHA-384</span>
+<span class="sd">  RS512 -&gt; RSASSA-PKCS1-v1_5 + SHA-512</span>
+
+<span class="sd">The KEY stays the same; only the hash used inside the signature changes.</span>
+<span class="sd">Note that, unlike HMAC, the RSA signature length is governed by the KEY SIZE</span>
+<span class="sd">(2048-bit key -&gt; 256-byte signature), not by the hash — so all three produce</span>
+<span class="sd">the same signature size for a given key.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">raw_signature_len</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">padding</span> <span class="o">=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment</span> <span class="o">+</span> <span class="n">padding</span><span class="p">))</span>
+
+
+<span class="k">for</span> <span class="n">alg</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;RS384&quot;</span><span class="p">,</span> <span class="s2">&quot;RS512&quot;</span><span class="p">]:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="n">alg</span><span class="p">)</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="n">alg</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- </span><span class="si">{</span><span class="n">alg</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  header alg:&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  signature size (bytes):&quot;</span><span class="p">,</span> <span class="n">raw_signature_len</span><span class="p">(</span><span class="n">token</span><span class="p">),</span> <span class="s2">&quot;(= key size / 8)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  decoded payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;With RSA the signature size tracks the KEY size (2048 bits -&gt; 256 bytes),&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;not the hash size — that is the big difference from the HMAC family.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/03_rs384_rs512.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_private_signs_public_verifies">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Private Signs Public Verifies</b><span>04_private_signs_public_verifies.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04_private_signs_public_verifies.py — Only the public key is needed to verify.</p>
+<p>This is the defining superpower of asymmetric signing:</p>
+<ul>
+<li>You SIGN with the PRIVATE key.</li>
+<li>You VERIFY with the PUBLIC key.</li>
+<li>The public key CANNOT be used to sign.</li>
+</ul>
+<p>So you can hand your public key to the whole world, and they can confirm your
+tokens are genuine — yet none of them can mint a token that appears to come
+from you. That is impossible with HMAC, where verify == sign.</p>
+<p>We prove both halves below.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_private_signs_public_verifies.py</span></div><pre>Verified with PUBLIC key only: {&#x27;iss&#x27;: &#x27;auth.example.com&#x27;, &#x27;sub&#x27;: &#x27;user-123&#x27;}
+(The verifier never needs — and never sees — the private key.)
+
+Attempt to SIGN with the public key failed, as expected:
+  AttributeError: &#x27;cryptography.hazmat.bindings._rust.openssl.rsa.RSAPublicKey&#x27; object has no attribute &#x27;sign&#x27;
+
+Conclusion: distributing the public key is safe; it only enables
+verification, never forgery.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_private_signs_public_verifies.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04_private_signs_public_verifies.py — Only the public key is needed to verify.</span>
+
+<span class="sd">This is the defining superpower of asymmetric signing:</span>
+
+<span class="sd">  * You SIGN with the PRIVATE key.</span>
+<span class="sd">  * You VERIFY with the PUBLIC key.</span>
+<span class="sd">  * The public key CANNOT be used to sign.</span>
+
+<span class="sd">So you can hand your public key to the whole world, and they can confirm your</span>
+<span class="sd">tokens are genuine — yet none of them can mint a token that appears to come</span>
+<span class="sd">from you. That is impossible with HMAC, where verify == sign.</span>
+
+<span class="sd">We prove both halves below.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;auth.example.com&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">}</span>
+
+<span class="c1"># --- 1) Private key signs; public key verifies (the normal flow) ---------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified with PUBLIC key only:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;(The verifier never needs — and never sees — the private key.)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- 2) You CANNOT sign with just the public key -------------------------</span>
+<span class="c1"># Signing requires the private key. Handing jwt.encode a public key fails.</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unexpected: signing with the public key succeeded?!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># cryptography/PyJWT raises when no private material</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Attempt to SIGN with the public key failed, as expected:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Conclusion: distributing the public key is safe; it only enables&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;verification, never forgery.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/04_private_signs_public_verifies.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_wrong_public_key_fails">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Wrong Public Key Fails</b><span>05_wrong_public_key_fails.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05_wrong_public_key_fails.py — A mismatched public key rejects the token.</p>
+<p>A signature only verifies against the public key that PAIRS with the private
+key that produced it. If you try to verify a token using an unrelated public
+key, PyJWT raises InvalidSignatureError.</p>
+<p>This is exactly what protects you from forgeries: an attacker's key pair
+produces signatures that your trusted public key will reject.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_wrong_public_key_fails.py</span></div><pre>Verifying with the matching public key (A):
+  {&#x27;sub&#x27;: &#x27;alice&#x27;} 
+
+Verifying with the WRONG public key (B):
+  Rejected -&gt; InvalidSignatureError: Signature verification failed
+
+Only the public key paired with the signing private key can verify.
+This is what makes signature forgery infeasible.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_wrong_public_key_fails.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05_wrong_public_key_fails.py — A mismatched public key rejects the token.</span>
+
+<span class="sd">A signature only verifies against the public key that PAIRS with the private</span>
+<span class="sd">key that produced it. If you try to verify a token using an unrelated public</span>
+<span class="sd">key, PyJWT raises InvalidSignatureError.</span>
+
+<span class="sd">This is exactly what protects you from forgeries: an attacker&#39;s key pair</span>
+<span class="sd">produces signatures that your trusted public key will reject.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="c1"># --- Keypair A: the legitimate signer ------------------------------------</span>
+<span class="n">private_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_a</span> <span class="o">=</span> <span class="n">private_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+<span class="c1"># --- Keypair B: an unrelated key pair ------------------------------------</span>
+<span class="n">private_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_b</span> <span class="o">=</span> <span class="n">private_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+<span class="c1"># Sign a token with A&#39;s private key.</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">private_a</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- Verify with the CORRECT public key (A) ------------------------------</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying with the matching public key (A):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_a</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- Verify with the WRONG public key (B) --------------------------------</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying with the WRONG public key (B):&quot;</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_b</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Rejected -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Only the public key paired with the signing private key can verify.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;This is what makes signature forgery infeasible.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/05_wrong_public_key_fails.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_load_keys_from_pem">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Load Keys From PEM</b><span>06_load_keys_from_pem.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06_load_keys_from_pem.py — Serialize keys to PEM and load them back.</p>
+<p>In the real world your keys live OUTSIDE your program — in files, secret
+managers, or environment variables — as PEM text. This script shows the full
+round trip:</p>
+<ol>
+<li>Generate a keypair.</li>
+<li>Serialize to PEM (private = PKCS#8, public = SubjectPublicKeyInfo).</li>
+<li>Write the PEMs to temporary files (tempfile).</li>
+<li>Read them back and re-parse with
+     serialization.load_pem_private_key / load_pem_public_key.</li>
+<li>Use the loaded keys with PyJWT.</li>
+</ol>
+<p>PyJWT can also take the raw PEM bytes directly; we demonstrate that too.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_load_keys_from_pem.py</span></div><pre>Wrote PEM files to:
+  /tmp/jwt-keys-n6epdwto/private.pem
+  /tmp/jwt-keys-n6epdwto/public.pem 
+
+Reloaded key objects:
+  private: RSAPrivateKey
+  public : RSAPublicKey 
+
+Signed with loaded private key:
+  {&#x27;sub&#x27;: &#x27;from-loaded-keys&#x27;} 
+
+Signed using raw PEM bytes directly:
+  {&#x27;sub&#x27;: &#x27;from-raw-pem&#x27;}
+
+Temporary key files cleaned up.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_load_keys_from_pem.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06_load_keys_from_pem.py — Serialize keys to PEM and load them back.</span>
+
+<span class="sd">In the real world your keys live OUTSIDE your program — in files, secret</span>
+<span class="sd">managers, or environment variables — as PEM text. This script shows the full</span>
+<span class="sd">round trip:</span>
+
+<span class="sd">  1. Generate a keypair.</span>
+<span class="sd">  2. Serialize to PEM (private = PKCS#8, public = SubjectPublicKeyInfo).</span>
+<span class="sd">  3. Write the PEMs to temporary files (tempfile).</span>
+<span class="sd">  4. Read them back and re-parse with</span>
+<span class="sd">     serialization.load_pem_private_key / load_pem_public_key.</span>
+<span class="sd">  5. Use the loaded keys with PyJWT.</span>
+
+<span class="sd">PyJWT can also take the raw PEM bytes directly; we demonstrate that too.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="c1"># --- 1) Generate + 2) serialize -----------------------------------------</span>
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+    <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+    <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+    <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+<span class="p">)</span>
+<span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+    <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+    <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># --- 3) Write the PEMs to temporary files --------------------------------</span>
+<span class="n">tmpdir</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">mkdtemp</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;jwt-keys-&quot;</span><span class="p">)</span>
+<span class="n">priv_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmpdir</span><span class="p">,</span> <span class="s2">&quot;private.pem&quot;</span><span class="p">)</span>
+<span class="n">pub_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tmpdir</span><span class="p">,</span> <span class="s2">&quot;public.pem&quot;</span><span class="p">)</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">priv_path</span><span class="p">,</span> <span class="s2">&quot;wb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+    <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">private_pem</span><span class="p">)</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">pub_path</span><span class="p">,</span> <span class="s2">&quot;wb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+    <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">public_pem</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Wrote PEM files to:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">priv_path</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">pub_path</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- 4) Load them back into key objects ----------------------------------</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">priv_path</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+    <span class="n">loaded_private</span> <span class="o">=</span> <span class="n">serialization</span><span class="o">.</span><span class="n">load_pem_private_key</span><span class="p">(</span><span class="n">fh</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span> <span class="n">password</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">pub_path</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+    <span class="n">loaded_public</span> <span class="o">=</span> <span class="n">serialization</span><span class="o">.</span><span class="n">load_pem_public_key</span><span class="p">(</span><span class="n">fh</span><span class="o">.</span><span class="n">read</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reloaded key objects:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  private:&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">loaded_private</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  public :&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">loaded_public</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- 5a) Use the LOADED key objects with PyJWT ---------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;from-loaded-keys&quot;</span><span class="p">},</span> <span class="n">loaded_private</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Signed with loaded private key:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">loaded_public</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- 5b) Hand the raw PEM bytes straight to PyJWT ------------------------</span>
+<span class="c1"># PyJWT parses PEM strings/bytes for you, so files aren&#39;t strictly required.</span>
+<span class="n">token2</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;from-raw-pem&quot;</span><span class="p">},</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Signed using raw PEM bytes directly:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token2</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]))</span>
+
+<span class="c1"># --- Cleanup -------------------------------------------------------------</span>
+<span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">priv_path</span><span class="p">)</span>
+<span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">pub_path</span><span class="p">)</span>
+<span class="n">os</span><span class="o">.</span><span class="n">rmdir</span><span class="p">(</span><span class="n">tmpdir</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Temporary key files cleaned up.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/06_load_keys_from_pem.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_key_sizes">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Key Sizes</b><span>07_key_sizes.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>07_key_sizes.py — RSA key size: 2048 vs 3072 bits.</p>
+<p>The RSA key size is the length of the modulus. Bigger keys are harder to
+break but cost more CPU to generate, sign, and verify, and produce larger
+signatures (signature size = key_size / 8 bytes).</p>
+<p>Rough guidance:
+  - 2048-bit: the modern minimum; fine for most systems today.
+  - 3072-bit: higher security margin (~128-bit security level); slower.
+  - &lt;2048-bit: considered weak — avoid.</p>
+<p>This script builds a token with each size, confirms it still verifies, and
+prints the signature size so you can see the cost.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_key_sizes.py</span></div><pre>--- RSA-2048 ---
+  keygen time:         79.9 ms
+  signature size:   256 bytes (= 2048/8)
+  verifies OK:      True
+
+--- RSA-3072 ---
+  keygen time:         58.2 ms
+  signature size:   384 bytes (= 3072/8)
+  verifies OK:      True
+
+Tradeoff: larger keys = stronger but slower and bigger tokens.
+2048-bit is a sound default; step up to 3072-bit for long-lived,
+high-value keys where the extra margin is worth the cost.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_key_sizes.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;07_key_sizes.py — RSA key size: 2048 vs 3072 bits.</span>
+
+<span class="sd">The RSA key size is the length of the modulus. Bigger keys are harder to</span>
+<span class="sd">break but cost more CPU to generate, sign, and verify, and produce larger</span>
+<span class="sd">signatures (signature size = key_size / 8 bytes).</span>
+
+<span class="sd">Rough guidance:</span>
+<span class="sd">  - 2048-bit: the modern minimum; fine for most systems today.</span>
+<span class="sd">  - 3072-bit: higher security margin (~128-bit security level); slower.</span>
+<span class="sd">  - &lt;2048-bit: considered weak — avoid.</span>
+
+<span class="sd">This script builds a token with each size, confirms it still verifies, and</span>
+<span class="sd">prints the signature size so you can see the cost.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">raw_signature_len</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">padding</span> <span class="o">=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment</span> <span class="o">+</span> <span class="n">padding</span><span class="p">))</span>
+
+
+<span class="k">for</span> <span class="n">key_size</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">2048</span><span class="p">,</span> <span class="mi">3072</span><span class="p">):</span>
+    <span class="c1"># Time the keygen to illustrate the perf tradeoff.</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="n">key_size</span><span class="p">)</span>
+    <span class="n">gen_ms</span> <span class="o">=</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- RSA-</span><span class="si">{</span><span class="n">key_size</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  keygen time:      </span><span class="si">{</span><span class="n">gen_ms</span><span class="si">:</span><span class="s2">7.1f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  signature size:   </span><span class="si">{</span><span class="n">raw_signature_len</span><span class="p">(</span><span class="n">token</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes (= </span><span class="si">{</span><span class="n">key_size</span><span class="si">}</span><span class="s2">/8)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  verifies OK:      </span><span class="si">{</span><span class="n">decoded</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Tradeoff: larger keys = stronger but slower and bigger tokens.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2048-bit is a sound default; step up to 3072-bit for long-lived,&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;high-value keys where the extra margin is worth the cost.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/07_key_sizes.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_rsa_vs_hmac_when_to_use">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>RSA Vs HMAC When To Use</b><span>08_rsa_vs_hmac_when_to_use.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>08_rsa_vs_hmac_when_to_use.py — Choosing between HMAC and RSA.</p>
+<p>Both HMAC (HS<em>) and RSA (RS</em>) produce signed, tamper-evident JWTs. The
+difference is the TRUST MODEL, and that is what should drive your choice.</p>
+<p>HMAC (symmetric):
+    - ONE shared secret signs and verifies.
+    - Whoever can verify can also forge.
+    - Great when the SAME party / mutually trusting services issue &amp; check.
+    - Simple: no key pairs, no PEM.</p>
+<p>RSA (asymmetric):
+    - PRIVATE key signs; PUBLIC key verifies.
+    - You can publish the public key to untrusted third parties.
+    - They can verify but NEVER forge.
+    - This is why OAuth2 / OIDC providers (Google, Microsoft Entra ID, Auth0)
+      sign with RSA/ECDSA and publish public keys via JWKS endpoints.</p>
+<p>This script demonstrates both side by side.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_rsa_vs_hmac_when_to_use.py</span></div><pre>============================================================
+HMAC (HS256): one shared secret — same-party trust
+============================================================
+Issuer signs with the secret.
+Verifier (same secret) -&gt; {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;scope&#x27;: &#x27;read&#x27;}
+Anyone holding the secret can also FORGE: {&#x27;sub&#x27;: &#x27;attacker&#x27;, &#x27;scope&#x27;: &#x27;admin&#x27;}
+=&gt; Only safe to share the secret with fully trusted parties.
+
+============================================================
+RSA (RS256): private signs, public verifies — third-party trust
+============================================================
+Provider signs with its PRIVATE key (kept secret).
+Third party (PUBLIC key) -&gt; {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;scope&#x27;: &#x27;read&#x27;}
+Third party tries to forge with the public key: AttributeError -&gt; cannot sign
+Wrong public key -&gt; InvalidSignatureError (forgeries rejected)
+=&gt; Publish the public key freely; only you can sign.
+
+DECISION GUIDE
+  Use HMAC  when one party (or tightly trusted services) issues AND verifies.
+  Use RSA   when others must verify but must NOT be able to sign
+            (public APIs, OAuth/OIDC providers, microservices across teams).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_rsa_vs_hmac_when_to_use.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;08_rsa_vs_hmac_when_to_use.py — Choosing between HMAC and RSA.</span>
+
+<span class="sd">Both HMAC (HS*) and RSA (RS*) produce signed, tamper-evident JWTs. The</span>
+<span class="sd">difference is the TRUST MODEL, and that is what should drive your choice.</span>
+
+<span class="sd">  HMAC (symmetric):</span>
+<span class="sd">    - ONE shared secret signs and verifies.</span>
+<span class="sd">    - Whoever can verify can also forge.</span>
+<span class="sd">    - Great when the SAME party / mutually trusting services issue &amp; check.</span>
+<span class="sd">    - Simple: no key pairs, no PEM.</span>
+
+<span class="sd">  RSA (asymmetric):</span>
+<span class="sd">    - PRIVATE key signs; PUBLIC key verifies.</span>
+<span class="sd">    - You can publish the public key to untrusted third parties.</span>
+<span class="sd">    - They can verify but NEVER forge.</span>
+<span class="sd">    - This is why OAuth2 / OIDC providers (Google, Microsoft Entra ID, Auth0)</span>
+<span class="sd">      sign with RSA/ECDSA and publish public keys via JWKS endpoints.</span>
+
+<span class="sd">This script demonstrates both side by side.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="s2">&quot;read&quot;</span><span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HMAC (HS256): one shared secret — same-party trust&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">shared_secret</span> <span class="o">=</span> <span class="s2">&quot;one-secret-shared-between-trusted-services&quot;</span>
+<span class="n">hs_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Issuer signs with the secret.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifier (same secret) -&gt;&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">hs_token</span><span class="p">,</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">]))</span>
+<span class="c1"># Anyone with the secret could ALSO mint tokens — that is the catch:</span>
+<span class="n">forged</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;attacker&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">},</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Anyone holding the secret can also FORGE:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; Only safe to share the secret with fully trusted parties.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RSA (RS256): private signs, public verifies — third-party trust&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+<span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+<span class="n">rs_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Provider signs with its PRIVATE key (kept secret).&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Third party (PUBLIC key) -&gt;&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">rs_token</span><span class="p">,</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]))</span>
+<span class="c1"># A third party holding only the public key CANNOT forge:</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;attacker&quot;</span><span class="p">},</span> <span class="n">public_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Third party tries to forge with the public key:&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="s2">&quot;-&gt; cannot sign&quot;</span><span class="p">)</span>
+<span class="c1"># And a wrong public key would reject the token:</span>
+<span class="n">other_public</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">rs_token</span><span class="p">,</span> <span class="n">other_public</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Wrong public key -&gt; InvalidSignatureError (forgeries rejected)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; Publish the public key freely; only you can sign.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DECISION GUIDE&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Use HMAC  when one party (or tightly trusted services) issues AND verifies.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Use RSA   when others must verify but must NOT be able to sign&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;            (public APIs, OAuth/OIDC providers, microservices across teams).&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/06-rsa-algorithms/08_rsa_vs_hmac_when_to_use.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="05-hmac-algorithms.html"><div class="dir">← Previous</div><div class="ttl">05 · Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</div></a><a class="next" href="07-ecdsa-algorithms.html"><div class="dir">Next →</div><div class="ttl">07 · Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

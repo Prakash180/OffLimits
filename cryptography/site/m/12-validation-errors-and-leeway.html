@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 12 · Validation, Errors &amp; Leeway · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html" class="active"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>12 · Module 12 · Validation, Errors &amp; Leeway</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#fbbf24,#f59e0b)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#fbbf24;border-color:#fbbf2455;background:#fbbf2411">Module 12</span>
+  <h1 style="margin-top:18px">Module 12 · Validation, Errors &amp; Leeway</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p><code>jwt.decode</code> looks like a single function call, but internally it is a <strong>pipeline of independent checks</strong> run in a specific order: is the string structurally three base64url segments? Does the signature verify against the key and pinned algorithm? Is <code>exp</code> in the past? Is <code>nbf</code> in the future? Does <code>aud</code> include us? Is <code>iss</code> trusted? Are all <code>require</code>d claims present? Each gate that fails raises a <strong>specific, typed exception</strong> — and crucially, those exceptions form an <strong>inheritance tree</strong> rooted at <code>PyJWTError</code>. That tree is the secret to writing auth code that is both robust and precise.</p>
+<p>The hierarchy matters because of how Python's <code>except</code> matching works: it catches by <em>class and subclass</em>. <code>InvalidSignatureError</code> <strong>is a</strong> <code>DecodeError</code> <strong>is an</strong> <code>InvalidTokenError</code> <strong>is a</strong> <code>PyJWTError</code>. So <code>except InvalidTokenError</code> is the practical "reject this token" catch-all, while <code>except ExpiredSignatureError</code> lets you respond narrowly — say, by offering a token refresh instead of a hard <code>401</code>. The rule that falls out of this: <strong>order your <code>except</code> blocks most-specific first</strong>, otherwise a broad catch placed too early silently swallows the precise cases you wanted to distinguish.</p>
+<p>The other half of this module is <strong>leeway</strong> — a deliberate tolerance for <strong>clock skew</strong>. Two servers never agree on the time to the millisecond; a token minted on a machine running three seconds fast can look "not yet valid" (<code>nbf</code> in the future) or "already expired" on a machine running slightly behind. <code>leeway=</code> (in seconds) widens the acceptance window on both the <code>exp</code> and <code>nbf</code> comparisons, so a token that is <em>just barely</em> outside the boundary still passes. The implementation is simply: compare <code>now</code> against <code>exp + leeway</code> and <code>nbf - leeway</code> instead of the raw values. Keep it to a few seconds — <code>leeway=3600</code> would mean expired tokens live an extra hour, which is a real security regression dressed up as forgiveness.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Think of airport boarding. A malformed boarding pass (unreadable barcode) is turned away at the scanner — that's a <code>DecodeError</code>. A forged pass with a bad signature is a <code>InvalidSignatureError</code>. A pass for <em>yesterday's</em> flight is <code>ExpiredSignatureError</code>; one for <em>tomorrow's</em> flight is <code>ImmatureSignatureError</code>; the right pass but for the <em>wrong gate</em> is <code>InvalidAudienceError</code>. Leeway is the gate agent letting you board 30 seconds after the official cutoff because their watch and yours disagree — a small, bounded grace, never an open door.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>jwt.decode</code> first splits and base64url-decodes the token; a structural failure raises <code>DecodeError</code>.</li>
+<li>It recomputes/verifies the signature with your key and pinned <code>algorithms</code>; a mismatch raises <code>InvalidSignatureError</code> (a subclass of <code>DecodeError</code>).</li>
+<li>It checks time claims: <code>exp</code> against now (+ leeway) → <code>ExpiredSignatureError</code>; <code>nbf</code> against now (− leeway) → <code>ImmatureSignatureError</code>.</li>
+<li>It checks <code>aud</code>/<code>iss</code> if you passed <code>audience=</code>/<code>issuer=</code> → <code>InvalidAudienceError</code> / <code>InvalidIssuerError</code>.</li>
+<li>It enforces <code>options={"require": [...]}</code> → <code>MissingRequiredClaimError</code> if any are absent.</li>
+<li>The first failing gate raises; your <code>except</code> ladder catches it by its concrete type and maps it to a <code>(ok, reason, http_status)</code> triple.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li><code>01_exception_hierarchy.py</code> prints the actual class tree (via MRO) — you can <em>see</em> that <code>InvalidSignatureError</code> descends from <code>DecodeError</code>.</li>
+<li><code>02</code>–<code>06</code> each trigger exactly <strong>one</strong> error type on purpose, so you learn the cause→exception mapping by demonstration.</li>
+<li><code>07_leeway.py</code> shows the <em>same</em> just-expired token being <strong>rejected</strong> without leeway and <strong>accepted</strong> with <code>leeway=10</code>.</li>
+<li><code>08_robust_validator.py</code> never lets an exception escape — every path returns a friendly reason and an HTTP status, the production-grade shape.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"Catch <code>except Exception</code> to be safe."</strong> That masks bugs and loses the precise reason; catch <code>PyJWTError</code>/<code>InvalidTokenError</code> instead.</li>
+<li><strong>"Order of <code>except</code> blocks doesn't matter."</strong> It absolutely does — broad-before-specific swallows the specific cases.</li>
+<li><strong>"Leeway is harmless slack."</strong> Large leeway extends the life of expired tokens; keep it to seconds.</li>
+<li><strong>"A token with no <code>exp</code> is fine."</strong> It never expires — use <code>options={"require": ["exp"]}</code> for anything sensitive.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-12-validation-errors-leeway">🚦 Module 12 · Validation, Errors &amp; Leeway</h1>
+<blockquote>
+<p>A token either verifies or it doesn't — but <em>why</em> it failed is the difference
+between a helpful <code>401</code> and a baffled user. This module maps PyJWT's exception
+hierarchy, triggers each failure on purpose, and builds a production-grade
+validator that never crashes.</p>
+</blockquote>
+<hr />
+<h2 id="the-big-idea">🧠 The big idea</h2>
+<p><code>jwt.decode</code> does a <em>lot</em> of checking: structure, signature, <code>exp</code>, <code>nbf</code>, <code>aud</code>,
+<code>iss</code>, required claims. Each distinct failure raises a <strong>specific</strong> exception, and
+those exceptions form an inheritance tree rooted at <code>PyJWTError</code>. Master the tree
+and you can:</p>
+<ul>
+<li><strong>Catch broadly</strong> — <code>except InvalidTokenError</code> to reject any bad token.</li>
+<li><strong>Catch narrowly</strong> — <code>except ExpiredSignatureError</code> to offer a refresh.</li>
+<li><strong>Tolerate clock skew</strong> — <code>leeway=</code> for tokens that are <em>just</em> expired/early.</li>
+</ul>
+<hr />
+<h2 id="the-exception-hierarchy">🌳 The exception hierarchy</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    A[PyJWTError] --&gt; B[InvalidTokenError]
+    B --&gt; C[DecodeError]
+    C --&gt; D[InvalidSignatureError]
+    B --&gt; E[ExpiredSignatureError]
+    B --&gt; F[ImmatureSignatureError]
+    B --&gt; G[InvalidAudienceError]
+    B --&gt; H[InvalidIssuerError]
+    B --&gt; I[InvalidIssuedAtError]
+    B --&gt; J[MissingRequiredClaimError]
+    B --&gt; K[InvalidAlgorithmError]
+    B --&gt; L[InvalidKeyError]</div></div>
+<blockquote>
+<p><strong>Order your <code>except</code> blocks most-specific first.</strong> Because
+<code>InvalidSignatureError</code> <em>is a</em> <code>DecodeError</code> <em>is an</em> <code>InvalidTokenError</code>, a
+broad catch placed too early will swallow the specific cases.</p>
+</blockquote>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>Triggers / teaches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_exception_hierarchy"><code>01_exception_hierarchy.py</code></a></td>
+<td>Prints the class tree via <code>inspect</code> MRO</td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_expired_signature_error"><code>02_expired_signature_error.py</code></a></td>
+<td><code>exp</code> in the past → <code>ExpiredSignatureError</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_invalid_signature_error"><code>03_invalid_signature_error.py</code></a></td>
+<td>Wrong key → <code>InvalidSignatureError</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_decode_error"><code>04_decode_error.py</code></a></td>
+<td>Malformed token → <code>DecodeError</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_invalid_audience_error"><code>05_invalid_audience_error.py</code></a></td>
+<td><code>aud</code> mismatch → <code>InvalidAudienceError</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_immature_signature_error"><code>06_immature_signature_error.py</code></a></td>
+<td><code>nbf</code> in the future → <code>ImmatureSignatureError</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_leeway"><code>07_leeway.py</code></a></td>
+<td><code>leeway=</code> accepts a just-expired token</td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_robust_validator"><code>08_robust_validator.py</code></a></td>
+<td>A reusable <code>validate()</code> mapping errors → friendly reasons + HTTP status</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-them">▶️ Run them</h3>
+<div class="codehl"><pre><span></span><code><span class="c1"># from the repo root: /home/astro/catalyst/jwt-test</span>
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/01_exception_hierarchy.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/02_expired_signature_error.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/03_invalid_signature_error.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/04_decode_error.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/05_invalid_audience_error.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/06_immature_signature_error.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/07_leeway.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/12-validation-errors-and-leeway/08_robust_validator.py
+</code></pre></div>
+
+<hr />
+<h2 id="error-meaning-response">🗂️ Error → meaning → response</h2>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>Cause</th>
+<th>Typical HTTP status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DecodeError</code></td>
+<td>Not a structurally valid JWT</td>
+<td><code>400 Bad Request</code></td>
+</tr>
+<tr>
+<td><code>InvalidSignatureError</code></td>
+<td>Wrong key / tampered token</td>
+<td><code>401 Unauthorized</code></td>
+</tr>
+<tr>
+<td><code>ExpiredSignatureError</code></td>
+<td><code>exp</code> is in the past</td>
+<td><code>401 Unauthorized</code></td>
+</tr>
+<tr>
+<td><code>ImmatureSignatureError</code></td>
+<td><code>nbf</code> is in the future</td>
+<td><code>401 Unauthorized</code></td>
+</tr>
+<tr>
+<td><code>InvalidAudienceError</code></td>
+<td><code>aud</code> doesn't include us</td>
+<td><code>403 Forbidden</code></td>
+</tr>
+<tr>
+<td><code>InvalidIssuerError</code></td>
+<td><code>iss</code> not trusted</td>
+<td><code>403 Forbidden</code></td>
+</tr>
+<tr>
+<td><code>MissingRequiredClaimError</code></td>
+<td>A <code>require</code>d claim is absent</td>
+<td><code>400 Bad Request</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="leeway-visually">⏱️ Leeway, visually</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    subgraph &quot;leeway = 10s&quot;
+        E[exp] -.10s grace.-&gt; G[still accepted]
+    end
+    N[now, 5s after exp] --&gt; G</div></div>
+<p>Without leeway the 5-second-late token is rejected; with <code>leeway=10</code> it slips
+inside the grace window.</p>
+<hr />
+<h2 id="key-takeaways">✅ Key takeaways</h2>
+<ul>
+<li>Every validation failure is a typed exception under <code>PyJWTError</code>.</li>
+<li><code>InvalidTokenError</code> is the practical catch-all for "reject this token".</li>
+<li>Order <code>except</code> blocks <strong>specific → general</strong>, or specifics get swallowed.</li>
+<li><code>leeway=</code> forgives small clock skew on <code>exp</code>/<code>nbf</code> — keep it to seconds.</li>
+<li>A good validator converts exceptions into <code>(ok, reason, status)</code> and never lets
+  one escape to the caller.</li>
+</ul>
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>Bare <code>except Exception</code>.</strong> You'll mask bugs and lose the precise reason.
+  Catch <code>PyJWTError</code>/<code>InvalidTokenError</code> instead.</li>
+<li><strong>Leaking internals.</strong> Don't return raw exception text to end users for auth
+  failures; map to friendly messages (as script 08 does).</li>
+<li><strong>Huge leeway.</strong> <code>leeway=3600</code> means expired tokens live an extra hour — a real
+  security regression.</li>
+<li><strong>Forgetting <code>algorithms=[...]</code>.</strong> Omitting it raises <code>DecodeError</code>; never work
+  around that by trusting the token's own <code>alg</code>.</li>
+<li><strong>Not requiring <code>exp</code>.</strong> A token with no expiry never expires. Use
+  <code>options={"require": ["exp"]}</code> for anything sensitive.</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_exception_hierarchy" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Exception Hierarchy</b><span>01_exception_hierarchy.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01 · The PyJWT exception hierarchy.</p>
+<p>When validation fails, PyJWT raises a <em>specific</em> exception — and those exceptions
+form a tidy inheritance tree. Knowing the tree lets you catch broadly
+(<code>PyJWTError</code> for "anything JWT went wrong") or narrowly
+(<code>ExpiredSignatureError</code> for "just this case").</p>
+<p>The hierarchy (rooted at <code>PyJWTError</code>):</p>
+<div class="codehl"><pre><span></span><code>PyJWTError
+└── InvalidTokenError
+    ├── DecodeError
+    │   └── InvalidSignatureError
+    ├── ExpiredSignatureError
+    ├── InvalidAudienceError
+    ├── InvalidIssuerError
+    ├── InvalidIssuedAtError
+    ├── ImmatureSignatureError        (nbf in the future)
+    ├── InvalidKeyError
+    ├── InvalidAlgorithmError
+    └── MissingRequiredClaimError
+</code></pre></div>
+
+<p>Because almost everything subclasses <code>InvalidTokenError</code>, a single
+<code>except InvalidTokenError</code> is a safe catch-all for "reject this token", while
+<code>except PyJWTError</code> also covers encoding-side problems.</p>
+<p>This script uses <code>inspect</code> to print each class's Method Resolution Order (MRO),
+which <em>is</em> its ancestry chain.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/01_exception_hierarchy.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_exception_hierarchy.py</span></div><pre>PyJWT exception ancestry (each line = class -&gt; its base classes):
+
+  PyJWTError                : Exception -&gt; BaseException
+  InvalidTokenError         : PyJWTError -&gt; Exception -&gt; BaseException
+  DecodeError               : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  InvalidSignatureError     : DecodeError -&gt; InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  ExpiredSignatureError     : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  InvalidAudienceError      : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  InvalidIssuerError        : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  ImmatureSignatureError    : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  MissingRequiredClaimError : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  InvalidAlgorithmError     : InvalidTokenError -&gt; PyJWTError -&gt; Exception -&gt; BaseException
+  InvalidKeyError           : PyJWTError -&gt; Exception -&gt; BaseException
+
+Subclass checks (why catch-alls work):
+  ExpiredSignatureError is an InvalidTokenError? True
+  InvalidSignatureError is a DecodeError?        True
+  Every error is a PyJWTError?                   True
+
+✅ Catch InvalidTokenError to reject any bad token; subclasses for detail.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_exception_hierarchy.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01 · The PyJWT exception hierarchy.</span>
+
+<span class="sd">When validation fails, PyJWT raises a *specific* exception — and those exceptions</span>
+<span class="sd">form a tidy inheritance tree. Knowing the tree lets you catch broadly</span>
+<span class="sd">(``PyJWTError`` for &quot;anything JWT went wrong&quot;) or narrowly</span>
+<span class="sd">(``ExpiredSignatureError`` for &quot;just this case&quot;).</span>
+
+<span class="sd">The hierarchy (rooted at ``PyJWTError``):</span>
+
+<span class="sd">    PyJWTError</span>
+<span class="sd">    └── InvalidTokenError</span>
+<span class="sd">        ├── DecodeError</span>
+<span class="sd">        │   └── InvalidSignatureError</span>
+<span class="sd">        ├── ExpiredSignatureError</span>
+<span class="sd">        ├── InvalidAudienceError</span>
+<span class="sd">        ├── InvalidIssuerError</span>
+<span class="sd">        ├── InvalidIssuedAtError</span>
+<span class="sd">        ├── ImmatureSignatureError        (nbf in the future)</span>
+<span class="sd">        ├── InvalidKeyError</span>
+<span class="sd">        ├── InvalidAlgorithmError</span>
+<span class="sd">        └── MissingRequiredClaimError</span>
+
+<span class="sd">Because almost everything subclasses ``InvalidTokenError``, a single</span>
+<span class="sd">``except InvalidTokenError`` is a safe catch-all for &quot;reject this token&quot;, while</span>
+<span class="sd">``except PyJWTError`` also covers encoding-side problems.</span>
+
+<span class="sd">This script uses ``inspect`` to print each class&#39;s Method Resolution Order (MRO),</span>
+<span class="sd">which *is* its ancestry chain.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/01_exception_hierarchy.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">exc</span>
+
+<span class="c1"># The classes we want to map, in a sensible teaching order.</span>
+<span class="n">CLASSES</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">PyJWTError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidTokenError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">DecodeError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidSignatureError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">ExpiredSignatureError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidAudienceError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidIssuerError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">ImmatureSignatureError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">MissingRequiredClaimError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidAlgorithmError</span><span class="p">,</span>
+    <span class="n">exc</span><span class="o">.</span><span class="n">InvalidKeyError</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PyJWT exception ancestry (each line = class -&gt; its base classes):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="k">for</span> <span class="bp">cls</span> <span class="ow">in</span> <span class="n">CLASSES</span><span class="p">:</span>
+        <span class="c1"># MRO without &#39;object&#39; and the class itself = its real ancestors.</span>
+        <span class="n">ancestors</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="vm">__name__</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getmro</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="nb">object</span><span class="p">)]</span>
+        <span class="n">chain</span> <span class="o">=</span> <span class="s2">&quot; -&gt; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ancestors</span><span class="p">)</span> <span class="k">if</span> <span class="n">ancestors</span> <span class="k">else</span> <span class="s2">&quot;(root)&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="bp">cls</span><span class="o">.</span><span class="vm">__name__</span><span class="si">:</span><span class="s2">&lt;25</span><span class="si">}</span><span class="s2"> : </span><span class="si">{</span><span class="n">chain</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Demonstrate the practical payoff: broad vs. narrow catching.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Subclass checks (why catch-alls work):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ExpiredSignatureError is an InvalidTokenError? &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">issubclass</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">ExpiredSignatureError</span><span class="p">,</span><span class="w"> </span><span class="n">exc</span><span class="o">.</span><span class="n">InvalidTokenError</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  InvalidSignatureError is a DecodeError?        &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">issubclass</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">InvalidSignatureError</span><span class="p">,</span><span class="w"> </span><span class="n">exc</span><span class="o">.</span><span class="n">DecodeError</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Every error is a PyJWTError?                   &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">all</span><span class="p">(</span><span class="nb">issubclass</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="w"> </span><span class="n">exc</span><span class="o">.</span><span class="n">PyJWTError</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">CLASSES</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Catch InvalidTokenError to reject any bad token; subclasses for detail.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/01_exception_hierarchy.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_expired_signature_error">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Expired Signature Error</b><span>02_expired_signature_error.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02 · <code>ExpiredSignatureError</code> — the token's time is up.</p>
+<p>The <code>exp</code> (expiration time) claim is a Unix timestamp after which the token must
+be rejected. PyJWT checks it automatically during <code>decode</code> (when <code>exp</code> is
+present) and raises <code>ExpiredSignatureError</code> once the current time passes it.</p>
+<p>We make this happen <em>deliberately</em> by issuing a token that already expired one
+hour ago, then decoding it.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/02_expired_signature_error.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_expired_signature_error.py</span></div><pre>Issued a token that expired 1 hour ago.
+
+❌ Caught ExpiredSignatureError: Signature has expired
+   Meaning: the &#x27;exp&#x27; timestamp is in the past. Reject the token.
+
+✅ PyJWT enforces &#x27;exp&#x27; for you — no manual time math needed.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_expired_signature_error.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02 · ``ExpiredSignatureError`` — the token&#39;s time is up.</span>
+
+<span class="sd">The ``exp`` (expiration time) claim is a Unix timestamp after which the token must</span>
+<span class="sd">be rejected. PyJWT checks it automatically during ``decode`` (when ``exp`` is</span>
+<span class="sd">present) and raises ``ExpiredSignatureError`` once the current time passes it.</span>
+
+<span class="sd">We make this happen *deliberately* by issuing a token that already expired one</span>
+<span class="sd">hour ago, then decoding it.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/02_expired_signature_error.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>  <span class="c1"># always timezone-aware!</span>
+
+    <span class="c1"># exp one hour in the PAST -&gt; already expired.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;grace&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Issued a token that expired 1 hour ago.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Caught </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Meaning: the &#39;exp&#39; timestamp is in the past. Reject the token.&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unexpected: token verified (it should have been expired).&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ PyJWT enforces &#39;exp&#39; for you — no manual time math needed.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/02_expired_signature_error.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_invalid_signature_error">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Invalid Signature Error</b><span>03_invalid_signature_error.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03 · <code>InvalidSignatureError</code> — wrong key, tampered token.</p>
+<p>The signature proves the token was produced by someone holding the signing key
+<em>and</em> that not a single byte changed since. If you verify with the <strong>wrong
+secret</strong> (or the token was altered), the recomputed signature won't match and
+PyJWT raises <code>InvalidSignatureError</code>.</p>
+<p>Note <code>InvalidSignatureError</code> is a subclass of <code>DecodeError</code> — the signature
+<em>decoded</em> fine, it just didn't <em>validate</em>.</p>
+<p>Here we sign with one secret and verify with another.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/03_invalid_signature_error.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_invalid_signature_error.py</span></div><pre>Token signed with the correct secret.
+
+❌ Caught InvalidSignatureError: Signature verification failed
+   Meaning: signature didn&#x27;t match -&gt; wrong key or tampered token.
+
+✅ With the correct secret it verifies fine: {&#x27;user&#x27;: &#x27;heidi&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_invalid_signature_error.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03 · ``InvalidSignatureError`` — wrong key, tampered token.</span>
+
+<span class="sd">The signature proves the token was produced by someone holding the signing key</span>
+<span class="sd">*and* that not a single byte changed since. If you verify with the **wrong</span>
+<span class="sd">secret** (or the token was altered), the recomputed signature won&#39;t match and</span>
+<span class="sd">PyJWT raises ``InvalidSignatureError``.</span>
+
+<span class="sd">Note ``InvalidSignatureError`` is a subclass of ``DecodeError`` — the signature</span>
+<span class="sd">*decoded* fine, it just didn&#39;t *validate*.</span>
+
+<span class="sd">Here we sign with one secret and verify with another.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/03_invalid_signature_error.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">RIGHT_SECRET</span> <span class="o">=</span> <span class="s2">&quot;the-real-signing-secret-padded-to-32-bytes!&quot;</span>
+<span class="n">WRONG_SECRET</span> <span class="o">=</span> <span class="s2">&quot;an-attacker-guess-padded-to-at-least-32-byte&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;heidi&quot;</span><span class="p">},</span> <span class="n">RIGHT_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token signed with the correct secret.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Verifying with the wrong secret -&gt; signature mismatch.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">WRONG_SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Caught </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Meaning: signature didn&#39;t match -&gt; wrong key or tampered token.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Sanity: the right secret still works.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">RIGHT_SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ With the correct secret it verifies fine: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/03_invalid_signature_error.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_decode_error">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Decode Error</b><span>04_decode_error.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04 · <code>DecodeError</code> — the token is malformed.</p>
+<p>Before PyJWT can even <em>check</em> a signature, the string has to <em>look</em> like a JWT:
+three base64url segments joined by dots, with a valid JSON header and payload.
+Hand it <code>"not.a.jwt"</code> or other garbage and it fails structurally with
+<code>DecodeError</code> — distinct from a signature that's present but wrong
+(<code>InvalidSignatureError</code>) or a token that's well-formed but expired
+(<code>ExpiredSignatureError</code>).</p>
+<p>This script throws several kinds of malformed input at <code>decode</code>.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/04_decode_error.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_decode_error.py</span></div><pre>❌ &#x27;not enough segments&#x27;          -&gt; DecodeError: Invalid header string: &#x27;utf-8&#x27; codec can&#x27;t decode byte 0x9e in position 0: invalid start byte
+❌ &#x27;totally not a token&#x27;          -&gt; DecodeError: Not enough segments
+❌ &#x27;header not base64url/JSON&#x27;    -&gt; DecodeError: Invalid header string: Expecting value: line 1 column 1 (char 0)
+❌ &#x27;empty string&#x27;                 -&gt; DecodeError: Not enough segments
+
+✅ DecodeError = &#x27;this isn&#x27;t a valid JWT structurally&#x27;, before any crypto.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_decode_error.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04 · ``DecodeError`` — the token is malformed.</span>
+
+<span class="sd">Before PyJWT can even *check* a signature, the string has to *look* like a JWT:</span>
+<span class="sd">three base64url segments joined by dots, with a valid JSON header and payload.</span>
+<span class="sd">Hand it ``&quot;not.a.jwt&quot;`` or other garbage and it fails structurally with</span>
+<span class="sd">``DecodeError`` — distinct from a signature that&#39;s present but wrong</span>
+<span class="sd">(``InvalidSignatureError``) or a token that&#39;s well-formed but expired</span>
+<span class="sd">(``ExpiredSignatureError``).</span>
+
+<span class="sd">This script throws several kinds of malformed input at ``decode``.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/04_decode_error.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key&quot;</span>
+
+<span class="c1"># A grab-bag of structurally broken &quot;tokens&quot;.</span>
+<span class="n">BAD_TOKENS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;not enough segments&quot;</span><span class="p">:</span> <span class="s2">&quot;not.a.jwt&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;totally not a token&quot;</span><span class="p">:</span> <span class="s2">&quot;hello world&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;header not base64url/JSON&quot;</span><span class="p">:</span> <span class="s2">&quot;@@@.@@@.@@@&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;empty string&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">bad</span> <span class="ow">in</span> <span class="n">BAD_TOKENS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">bad</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">DecodeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ </span><span class="si">{</span><span class="n">label</span><span class="si">!r:</span><span class="s2">30</span><span class="si">}</span><span class="s2"> -&gt; DecodeError: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># Still in the family; show it explicitly if a subtype fires.</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ </span><span class="si">{</span><span class="n">label</span><span class="si">!r:</span><span class="s2">30</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;?? </span><span class="si">{</span><span class="n">label</span><span class="si">!r:</span><span class="s2">30</span><span class="si">}</span><span class="s2"> -&gt; unexpectedly decoded&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ DecodeError = &#39;this isn&#39;t a valid JWT structurally&#39;, before any crypto.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/04_decode_error.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_invalid_audience_error">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Invalid Audience Error</b><span>05_invalid_audience_error.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05 · <code>InvalidAudienceError</code> — this token isn't meant for you.</p>
+<p>The <code>aud</code> (audience) claim names the intended recipient(s). When you call
+<code>jwt.decode(..., audience=...)</code>, PyJWT checks that your expected audience is
+listed in the token's <code>aud</code>. If it isn't, you get <code>InvalidAudienceError</code>.</p>
+<p>This stops a token minted for <em>Service A</em> from being replayed against
+<em>Service B</em> — even though both might trust the same issuer/key.</p>
+<p>Two cases shown:
+    - mismatch (token aud = "service-a", we expect "service-b") -&gt; error;
+    - match -&gt; success.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/05_invalid_audience_error.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_invalid_audience_error.py</span></div><pre>Token issued for audience &#x27;service-a&#x27;.
+
+Verifying as &#x27;service-b&#x27; (wrong audience):
+  ❌ Caught InvalidAudienceError: Audience doesn&#x27;t match
+     Meaning: token&#x27;s &#x27;aud&#x27; doesn&#x27;t include us -&gt; reject.
+
+✅ As &#x27;service-a&#x27; it verifies: {&#x27;user&#x27;: &#x27;ivan&#x27;, &#x27;aud&#x27;: &#x27;service-a&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_invalid_audience_error.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05 · ``InvalidAudienceError`` — this token isn&#39;t meant for you.</span>
+
+<span class="sd">The ``aud`` (audience) claim names the intended recipient(s). When you call</span>
+<span class="sd">``jwt.decode(..., audience=...)``, PyJWT checks that your expected audience is</span>
+<span class="sd">listed in the token&#39;s ``aud``. If it isn&#39;t, you get ``InvalidAudienceError``.</span>
+
+<span class="sd">This stops a token minted for *Service A* from being replayed against</span>
+<span class="sd">*Service B* — even though both might trust the same issuer/key.</span>
+
+<span class="sd">Two cases shown:</span>
+<span class="sd">    - mismatch (token aud = &quot;service-a&quot;, we expect &quot;service-b&quot;) -&gt; error;</span>
+<span class="sd">    - match -&gt; success.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/05_invalid_audience_error.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ivan&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="s2">&quot;service-a&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token issued for audience &#39;service-a&#39;.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># We are service-b: the audiences don&#39;t match.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying as &#39;service-b&#39; (wrong audience):&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;service-b&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAudienceError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ❌ Caught </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     Meaning: token&#39;s &#39;aud&#39; doesn&#39;t include us -&gt; reject.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Verifying with the correct audience succeeds.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;service-a&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ As &#39;service-a&#39; it verifies: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/05_invalid_audience_error.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_immature_signature_error">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Immature Signature Error</b><span>06_immature_signature_error.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06 · <code>ImmatureSignatureError</code> — the token isn't valid YET.</p>
+<p>The <code>nbf</code> (not before) claim is the mirror image of <code>exp</code>: a Unix timestamp
+<em>before</em> which the token must be rejected. It's used for tokens that should only
+activate in the future (scheduled access, delayed grants). Decode such a token
+too early and PyJWT raises <code>ImmatureSignatureError</code>.</p>
+<p>We set <code>nbf</code> one hour in the future and try to use it immediately.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/06_immature_signature_error.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_immature_signature_error.py</span></div><pre>Issued a token with nbf 1 hour in the future.
+
+❌ Caught ImmatureSignatureError: The token is not yet valid (nbf)
+   Meaning: &#x27;nbf&#x27; hasn&#x27;t been reached yet -&gt; token not active.
+
+✅ nbf gates a token&#x27;s START time, just as exp gates its END time.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_immature_signature_error.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06 · ``ImmatureSignatureError`` — the token isn&#39;t valid YET.</span>
+
+<span class="sd">The ``nbf`` (not before) claim is the mirror image of ``exp``: a Unix timestamp</span>
+<span class="sd">*before* which the token must be rejected. It&#39;s used for tokens that should only</span>
+<span class="sd">activate in the future (scheduled access, delayed grants). Decode such a token</span>
+<span class="sd">too early and PyJWT raises ``ImmatureSignatureError``.</span>
+
+<span class="sd">We set ``nbf`` one hour in the future and try to use it immediately.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/06_immature_signature_error.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># nbf one hour in the FUTURE -&gt; not valid until then.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;judy&quot;</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Issued a token with nbf 1 hour in the future.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ImmatureSignatureError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Caught </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Meaning: &#39;nbf&#39; hasn&#39;t been reached yet -&gt; token not active.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ nbf gates a token&#39;s START time, just as exp gates its END time.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/06_immature_signature_error.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_leeway">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Leeway</b><span>07_leeway.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>07 · <code>leeway</code> — tolerating small clock skew.</p>
+<p>Real clocks drift. A token that expired 5 seconds ago might be perfectly fine to
+accept if the issuer's clock was simply a hair ahead of yours. PyJWT's <code>leeway</code>
+argument adds a grace window (in seconds, or a <code>timedelta</code>) to the time-based
+checks (<code>exp</code> and <code>nbf</code>), so <em>just</em>-expired or <em>just</em>-premature tokens are
+still accepted.</p>
+<p>This script issues a token that expired 5 seconds ago and decodes it two ways:
+    - WITHOUT leeway  -&gt; ExpiredSignatureError;
+    - WITH leeway=10  -&gt; accepted (5s &lt; 10s grace).</p>
+<p>⚠️ Keep leeway small (a few seconds to a minute). It directly extends how long an
+expired token remains usable.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/07_leeway.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_leeway.py</span></div><pre>Token expired 5 seconds ago.
+
+A) decode WITHOUT leeway:
+   ❌ ExpiredSignatureError: Signature has expired
+
+B) decode WITH leeway=10 seconds:
+   ✅ accepted within grace window: {&#x27;user&#x27;: &#x27;mallory&#x27;, &#x27;exp&#x27;: 1782849917}
+
+✅ leeway absorbs small clock skew — use sparingly (seconds, not hours).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_leeway.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;07 · ``leeway`` — tolerating small clock skew.</span>
+
+<span class="sd">Real clocks drift. A token that expired 5 seconds ago might be perfectly fine to</span>
+<span class="sd">accept if the issuer&#39;s clock was simply a hair ahead of yours. PyJWT&#39;s ``leeway``</span>
+<span class="sd">argument adds a grace window (in seconds, or a ``timedelta``) to the time-based</span>
+<span class="sd">checks (``exp`` and ``nbf``), so *just*-expired or *just*-premature tokens are</span>
+<span class="sd">still accepted.</span>
+
+<span class="sd">This script issues a token that expired 5 seconds ago and decodes it two ways:</span>
+<span class="sd">    - WITHOUT leeway  -&gt; ExpiredSignatureError;</span>
+<span class="sd">    - WITH leeway=10  -&gt; accepted (5s &lt; 10s grace).</span>
+
+<span class="sd">⚠️ Keep leeway small (a few seconds to a minute). It directly extends how long an</span>
+<span class="sd">expired token remains usable.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/07_leeway.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># Expired just 5 seconds ago.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;mallory&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">5</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token expired 5 seconds ago.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Side A: no leeway -&gt; rejected.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;A) decode WITHOUT leeway:&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ❌ </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Side B: 10 seconds of leeway -&gt; accepted.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;B) decode WITH leeway=10 seconds:&quot;</span><span class="p">)</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">leeway</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✅ accepted within grace window: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ leeway absorbs small clock skew — use sparingly (seconds, not hours).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/07_leeway.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_robust_validator">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Robust Validator</b><span>08_robust_validator.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>08 · A robust, reusable token validator.</p>
+<p>Pulling the whole module together: a single <code>validate(token)</code> function that
+returns a tuple <code>(ok, result)</code> instead of letting exceptions escape. On success
+<code>result</code> is the claims dict; on failure it's a friendly explanation. We also map
+each failure to an HTTP-like status, the way an API gateway would.</p>
+<p>The try/except <em>ladder</em> matters: order matters because the exceptions are
+subclasses of one another. We catch the <strong>specific</strong> cases first and the
+<strong>general</strong> <code>InvalidTokenError</code> last, so each failure gets its precise message
+while nothing slips through unhandled.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/12-validation-errors-and-leeway/08_robust_validator.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_robust_validator.py</span></div><pre>case             status  result
+----------------------------------------------------------------------
+valid token         200  ✅ claims OK (sub=u1)
+expired token       401  ❌ Token has expired — please re-authenticate.
+wrong audience      403  ❌ Token audience mismatch — not issued for this service.
+missing exp         400  ❌ Token is missing a required claim: Token is missing the &quot;exp&quot; claim.
+future nbf          401  ❌ Token is not valid yet (nbf in the future).
+tampered sig        401  ❌ Token signature is invalid — possible tampering.
+malformed           400  ❌ Token is malformed and cannot be decoded.
+wrong key           401  ❌ Token signature is invalid — possible tampering.
+
+✅ One validate() funnels every failure mode into a clean (ok, reason, status).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_robust_validator.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;08 · A robust, reusable token validator.</span>
+
+<span class="sd">Pulling the whole module together: a single ``validate(token)`` function that</span>
+<span class="sd">returns a tuple ``(ok, result)`` instead of letting exceptions escape. On success</span>
+<span class="sd">``result`` is the claims dict; on failure it&#39;s a friendly explanation. We also map</span>
+<span class="sd">each failure to an HTTP-like status, the way an API gateway would.</span>
+
+<span class="sd">The try/except *ladder* matters: order matters because the exceptions are</span>
+<span class="sd">subclasses of one another. We catch the **specific** cases first and the</span>
+<span class="sd">**general** ``InvalidTokenError`` last, so each failure gets its precise message</span>
+<span class="sd">while nothing slips through unhandled.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/12-validation-errors-and-leeway/08_robust_validator.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+<span class="n">AUDIENCE</span> <span class="o">=</span> <span class="s2">&quot;my-api&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">dict</span> <span class="o">|</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate a token. Returns (ok, claims_or_reason, http_status).&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">audience</span><span class="o">=</span><span class="n">AUDIENCE</span><span class="p">,</span>
+            <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">]},</span>  <span class="c1"># demand an expiry</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="n">claims</span><span class="p">,</span> <span class="mi">200</span>
+
+    <span class="c1"># --- specific cases first (most-derived -&gt; least-derived) ---</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token has expired — please re-authenticate.&quot;</span><span class="p">,</span> <span class="mi">401</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ImmatureSignatureError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token is not valid yet (nbf in the future).&quot;</span><span class="p">,</span> <span class="mi">401</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAudienceError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token audience mismatch — not issued for this service.&quot;</span><span class="p">,</span> <span class="mi">403</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidIssuerError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token issuer is not trusted.&quot;</span><span class="p">,</span> <span class="mi">403</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">MissingRequiredClaimError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Token is missing a required claim: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">,</span> <span class="mi">400</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token signature is invalid — possible tampering.&quot;</span><span class="p">,</span> <span class="mi">401</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">DecodeError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;Token is malformed and cannot be decoded.&quot;</span><span class="p">,</span> <span class="mi">400</span>
+    <span class="c1"># --- catch-all for anything else in the JWT family ---</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Token is invalid: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="mi">401</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="n">good_base</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;u1&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">AUDIENCE</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)}</span>
+
+    <span class="n">cases</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;valid token&quot;</span><span class="p">:</span> <span class="n">_make</span><span class="p">(</span><span class="n">good_base</span><span class="p">),</span>
+        <span class="s2">&quot;expired token&quot;</span><span class="p">:</span> <span class="n">_make</span><span class="p">({</span><span class="o">**</span><span class="n">good_base</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)}),</span>
+        <span class="s2">&quot;wrong audience&quot;</span><span class="p">:</span> <span class="n">_make</span><span class="p">({</span><span class="o">**</span><span class="n">good_base</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="s2">&quot;other-api&quot;</span><span class="p">}),</span>
+        <span class="s2">&quot;missing exp&quot;</span><span class="p">:</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;u1&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">AUDIENCE</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;future nbf&quot;</span><span class="p">:</span> <span class="n">_make</span><span class="p">({</span><span class="o">**</span><span class="n">good_base</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)}),</span>
+        <span class="s2">&quot;tampered sig&quot;</span><span class="p">:</span> <span class="n">_make</span><span class="p">(</span><span class="n">good_base</span><span class="p">)[:</span><span class="o">-</span><span class="mi">3</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;xxx&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;malformed&quot;</span><span class="p">:</span> <span class="s2">&quot;not.a.jwt&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;wrong key&quot;</span><span class="p">:</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">good_base</span><span class="p">,</span> <span class="s2">&quot;different-secret-padded-to-32-plus-bytes!&quot;</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">),</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;case&#39;</span><span class="si">:</span><span class="s2">&lt;16</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;status&#39;</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">  result&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">cases</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">ok</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">validate</span><span class="p">(</span><span class="n">tok</span><span class="p">)</span>
+        <span class="n">shown</span> <span class="o">=</span> <span class="n">result</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;claims OK (sub=</span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;sub&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="n">flag</span> <span class="o">=</span> <span class="s2">&quot;✅&quot;</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="s2">&quot;❌&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;16</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">status</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">flag</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">shown</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ One validate() funnels every failure mode into a clean (ok, reason, status).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/12-validation-errors-and-leeway/08_robust_validator.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="11-jwks-and-key-rotation.html"><div class="dir">← Previous</div><div class="ttl">11 · Module 11 · JWKS &amp; Key Rotation</div></a><a class="next" href="13-cryptography-deep-dive.html"><div class="dir">Next →</div><div class="ttl">13 · Module 13 · Cryptography Deep Dive</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

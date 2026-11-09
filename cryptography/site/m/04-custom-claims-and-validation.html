@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 04 · Custom Claims &amp; Validation Options · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html" class="active"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>04 · Module 04 · Custom Claims &amp; Validation Options</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#fbbf24,#f59e0b)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#fbbf24;border-color:#fbbf2455;background:#fbbf2411">Module 04</span>
+  <h1 style="margin-top:18px">Module 04 · Custom Claims &amp; Validation Options</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>A JWT payload is <strong>open-ended JSON</strong>, so beyond the seven registered names you can add any <strong>private claim</strong> your app needs — <code>roles</code>, <code>tenant</code>, <code>email</code>, feature flags. PyJWT treats them as opaque data: it signs them like everything else, but it has no opinion about their meaning. That means <em>reading</em> them is trivial (<code>decoded["roles"]</code>), and <em>trusting</em> them is entirely a function of whether you verified the signature first. The whole module orbits one idea: <strong>the signature decides trust; the claims decide policy</strong>, and you must never blur the two.</p>
+<p>The real subject here is <code>decode()</code>'s <strong>control surface</strong> — the <code>options</code>, <code>require</code>, and <code>leeway</code> knobs. By default PyJWT is strict in the ways that matter: it verifies the signature, and it enforces <code>exp</code> when present. Each knob <em>relaxes or tightens</em> one specific guardrail. <code>options={"verify_signature": False}</code> turns decoding into a pure base64url read — fast for inspection, but the returned claims are <strong>attacker-controllable</strong> and must never drive authorization. Critically, disabling signature verification also disables the dependent claim checks, because there's nothing trustworthy left to check.</p>
+<p><code>require=[...]</code> is about <strong>presence, not value</strong>: it forces certain claims to exist, raising <code>MissingRequiredClaimError</code> if not. Think of it as a schema gate — "every token <em>must</em> carry <code>exp</code>, <code>iss</code>, <code>sub</code>" — that runs before your value-level logic. It pairs naturally with the value checks (<code>issuer=</code>, <code>audience=</code>) from Module 03: <code>require</code> ensures the claim is there, those parameters check it's correct.</p>
+<p><code>leeway</code> exists because <strong>clocks drift</strong>. Two servers rarely agree to the millisecond, so a token that expired "one second ago" by your clock may be perfectly fresh by the issuer's. <code>leeway=timedelta(seconds=10)</code> widens the <code>exp</code>/<code>nbf</code>/<code>iat</code> boundaries by that grace window — PyJWT effectively compares against <code>exp + leeway</code>. The danger is obvious once you see it: every second of leeway is a second of extra replay window <em>past</em> expiry, so it should be seconds, never minutes.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Picture a <strong>nightclub door</strong>. The bouncer first checks the wristband is genuine (signature) — fake band, you're out, no further questions. <code>require</code> is the rule "everyone must show ID <em>and</em> a ticket" — missing either and you're turned away before they even read them. The value checks are reading the ID's name against the guest list. And <code>leeway</code> is the bouncer letting in someone whose ticket says "valid until 11:00" at 11:00:08 because the club clock and the ticket printer disagree by a few seconds — generous by seconds, never by an hour.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>jwt.encode()</code> packs registered <em>and</em> custom claims into one signed payload — PyJWT doesn't distinguish them while signing.</li>
+<li>A normal <code>jwt.decode(token, secret, algorithms=[...])</code> verifies the signature, enforces <code>exp</code>, then returns the full claims dict including your custom keys.</li>
+<li>With <code>options={"require": ["exp", "iss", "sub"]}</code>, PyJWT checks each listed claim <strong>exists</strong> before value checks; a gap raises <code>MissingRequiredClaimError</code>.</li>
+<li>With <code>leeway=timedelta(seconds=N)</code>, the <code>exp</code>/<code>nbf</code> comparisons are widened by <code>N</code> seconds, so a just-expired token can still pass.</li>
+<li>With <code>options={"verify_signature": False}</code>, PyJWT skips the HMAC check (and the dependent <code>exp</code>/<code>aud</code> checks) and simply base64url-decodes the payload — <strong>untrusted</strong>.</li>
+<li>Your code then reads custom claims (e.g. <code>roles</code>) and makes the authorization decision — which is only sound if step 2's signature check actually ran.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>01_custom_claims.py</code>, custom keys come back exactly as inserted — they're just JSON the signature protects.</li>
+<li>In <code>02_options_verify_signature.py</code>, the claims still decode with verification off, underscoring that an unverified read is <em>data</em>, not <em>trust</em>.</li>
+<li>In <code>05_require_claims.py</code>, removing a required claim raises <code>MissingRequiredClaimError</code> <em>before</em> any value comparison — presence is checked first.</li>
+<li>In <code>06_leeway.py</code>, a token that fails without leeway <strong>passes</strong> with a small <code>leeway</code> at the <code>exp</code> boundary — clock-skew tolerance made visible.</li>
+<li>In <code>08_role_based_access_demo.py</code>, <code>authorize()</code> grants or denies based on the <code>roles</code> claim — but only meaningfully because the token was verified first.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li>❌ "I can authorize on claims I read with <code>verify_signature: False</code>." False — those claims are attacker-controlled; never authorize on them.</li>
+<li>❌ "<code>require</code> checks the claim's value." False — it only checks <strong>presence</strong>; value checks (<code>issuer=</code>, <code>audience=</code>) are separate.</li>
+<li>❌ "More <code>leeway</code> is safer." Backwards — leeway <em>extends</em> the validity window past <code>exp</code>, widening the replay window. Keep it to seconds.</li>
+<li>❌ "Custom claims are private/hidden." False — the payload is base64url-encoded plaintext; anyone can read your <code>roles</code>/<code>email</code>. Never store secrets there.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-04-custom-claims-validation-options">🧩 Module 04 · Custom Claims &amp; Validation Options</h1>
+<blockquote>
+<p>Registered claims (Module 03) are the shared vocabulary. <strong>Custom claims</strong> are
+where <em>your</em> application data lives — roles, tenant, email, feature flags. And
+<code>jwt.decode()</code>'s <code>options=</code>, <code>require=</code>, and <code>leeway=</code> knobs let you decide
+<em>exactly</em> how strict verification should be.</p>
+</blockquote>
+<hr />
+<h2 id="the-big-idea">🧠 The big idea</h2>
+<p>A JWT payload is open-ended JSON. You can add any <strong>private claim</strong> your app
+needs. The flip side is control: PyJWT applies sensible defaults, but you can
+tighten verification (demand certain claims) or — carefully — loosen it (skip a
+check). Knowing which knob does what, and the risk of each, is the heart of safe
+token handling.</p>
+<h3 id="the-decode-control-surface">The <code>decode()</code> control surface</h3>
+<table>
+<thead>
+<tr>
+<th>Knob</th>
+<th>Purpose</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>options={"verify_signature": False}</code></td>
+<td>Read claims without trust</td>
+<td>signature <strong>is</strong> verified</td>
+</tr>
+<tr>
+<td><code>options={"verify_exp": False}</code></td>
+<td>Accept expired tokens</td>
+<td><code>exp</code> <strong>is</strong> enforced</td>
+</tr>
+<tr>
+<td><code>options={"verify_aud": False}</code></td>
+<td>Skip audience check</td>
+<td><code>aud</code> checked when <code>audience=</code> given</td>
+</tr>
+<tr>
+<td><code>options={"require": [...]}</code></td>
+<td>Demand claims be present</td>
+<td>nothing required</td>
+</tr>
+<tr>
+<td><code>leeway=timedelta(...)</code></td>
+<td>Grace window for clock skew</td>
+<td><code>0</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="choosing-how-strict-to-be">🌊 Choosing how strict to be</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    A[Need to read a token] --&gt; B{Do you trust the source?}
+    B -- &quot;No / debugging&quot; --&gt; C[verify_signature False&lt;br/&gt;read-only, never authorize]
+    B -- Yes --&gt; D[Verify signature]
+    D --&gt; E{Enforce presence?}
+    E -- yes --&gt; F[&quot;options require: exp, iss, sub&quot;]
+    E -- no --&gt; G[Skip]
+    F --&gt; H{Clocks may drift?}
+    G --&gt; H
+    H -- yes --&gt; I[Add small leeway]
+    H -- no --&gt; J[Decode strictly]
+    I --&gt; K[Read custom claims -&gt; authorize]
+    J --&gt; K</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it demonstrates</th>
+<th>Run it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_custom_claims"><code>01_custom_claims.py</code></a></td>
+<td>Add &amp; read <code>roles</code>, <code>email</code>, <code>tenant</code></td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/01_custom_claims.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_options_verify_signature"><code>02_options_verify_signature.py</code></a></td>
+<td><code>verify_signature: False</code> and why it's untrusted</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/02_options_verify_signature.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_options_verify_exp"><code>03_options_verify_exp.py</code></a></td>
+<td><code>verify_exp: False</code> to accept expired tokens (risky)</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/03_options_verify_exp.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_options_verify_aud"><code>04_options_verify_aud.py</code></a></td>
+<td><code>verify_aud: False</code> to skip audience</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/04_options_verify_aud.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_require_claims"><code>05_require_claims.py</code></a></td>
+<td><code>require: [...]</code>; <code>MissingRequiredClaimError</code></td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/05_require_claims.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_leeway"><code>06_leeway.py</code></a></td>
+<td><code>leeway</code> for clock skew at the <code>exp</code> boundary</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/06_leeway.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_nested_and_namespaced_claims"><code>07_nested_and_namespaced_claims.py</code></a></td>
+<td>Nested objects &amp; URL-style (OIDC) claim keys</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/07_nested_and_namespaced_claims.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_role_based_access_demo"><code>08_role_based_access_demo.py</code></a></td>
+<td><code>authorize()</code> enforcing a required role from claims</td>
+<td><code>.venv/bin/python pyjwt-course/04-custom-claims-and-validation/08_role_based_access_demo.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run the whole module:</p>
+<div class="codehl"><pre><span></span><code><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/04-custom-claims-and-validation/0*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== </span><span class="nv">$f</span><span class="s2"> ==&quot;</span><span class="p">;</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="key-takeaways">✅ Key takeaways</h2>
+<ul>
+<li><strong>Custom claims are just JSON.</strong> Read them with <code>decoded["key"]</code> or
+  <code>decoded.get("key", default)</code>.</li>
+<li><strong><code>verify_signature: False</code> = untrusted.</strong> Great for inspection, never for
+  authorization decisions.</li>
+<li><strong>Disabling checks shifts risk to you.</strong> <code>verify_exp: False</code> and
+  <code>verify_aud: False</code> remove guardrails — justify every use.</li>
+<li><strong><code>require</code> enforces presence; value checks come after.</strong> Use it to mandate
+  <code>exp</code>/<code>iss</code>/<code>sub</code>.</li>
+<li><strong><code>leeway</code> should be small.</strong> Seconds of grace for clock skew, not minutes.</li>
+<li><strong>Namespace custom claims</strong> (URL-style) to avoid collisions, as OIDC does.</li>
+</ul>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li>🕳️ <strong>Authorizing on unverified data.</strong> If you decoded with
+  <code>verify_signature: False</code>, the <code>roles</code> you read are attacker-controlled.</li>
+<li>🕳️ <strong>Leaving <code>verify_exp: False</code> in production.</strong> Expired/stolen tokens never
+  die.</li>
+<li>🕳️ <strong>Skipping <code>aud</code> by habit.</strong> Invites audience-confusion attacks across
+  services.</li>
+<li>🕳️ <strong>Over-wide <code>leeway</code>.</strong> A 5-minute leeway is a 5-minute replay window past
+  expiry.</li>
+<li>🕳️ <strong>Putting secrets in claims.</strong> The payload is only base64url-encoded —
+  <em>anyone</em> can read it. Never store passwords or PII you wouldn't log.</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_custom_claims" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Custom Claims</b><span>01_custom_claims.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01 · Custom (private) claims.</p>
+<p>Beyond the seven registered claims, you can put any JSON-serialisable data in
+the payload. These are <strong>private claims</strong> — meaningful only to your application.
+Common examples: <code>roles</code>, <code>email</code>, <code>tenant</code>, <code>permissions</code>.</p>
+<p>To avoid collisions with future registered claims (or other systems), real
+deployments often namespace custom keys (see script 07). Here we keep them
+simple to focus on the read/write round-trip.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/01_custom_claims.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_custom_claims.py</span></div><pre>Encoded a token carrying custom claims.
+
+email : ada@example.com
+tenant: acme-corp
+roles : [&#x27;editor&#x27;, &#x27;billing&#x27;]
+plan  : &lt;not present&gt;</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_custom_claims.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01 · Custom (private) claims.</span>
+
+<span class="sd">Beyond the seven registered claims, you can put any JSON-serialisable data in</span>
+<span class="sd">the payload. These are **private claims** — meaningful only to your application.</span>
+<span class="sd">Common examples: `roles`, `email`, `tenant`, `permissions`.</span>
+
+<span class="sd">To avoid collisions with future registered claims (or other systems), real</span>
+<span class="sd">deployments often namespace custom keys (see script 07). Here we keep them</span>
+<span class="sd">simple to focus on the read/write round-trip.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/01_custom_claims.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Custom claims sit right alongside any registered ones.</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;email&quot;</span><span class="p">:</span> <span class="s2">&quot;ada@example.com&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;tenant&quot;</span><span class="p">:</span> <span class="s2">&quot;acme-corp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;roles&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;editor&quot;</span><span class="p">,</span> <span class="s2">&quot;billing&quot;</span><span class="p">],</span>
+    <span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded a token carrying custom claims.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+
+    <span class="c1"># Read custom claims back out — they are just dict keys.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;email :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;email&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;tenant:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;tenant&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;roles :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;roles&quot;</span><span class="p">])</span>
+
+    <span class="c1"># Use .get() for optional claims so a missing key won&#39;t crash.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;plan  :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;plan&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;not present&gt;&quot;</span><span class="p">))</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/01_custom_claims.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_options_verify_signature">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Options Verify Signature</b><span>02_options_verify_signature.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02 · options={"verify_signature": False}.</p>
+<p>The signature is what makes a JWT <em>trustworthy</em>. Disabling its verification
+means you are reading <strong>unauthenticated</strong> data — anyone could have forged or
+tampered with it.</p>
+<p>Legitimate uses are narrow:
+  * inspecting a token's claims/header for debugging,
+  * reading the <code>kid</code>/<code>iss</code> to decide <em>which</em> key to then verify with.</p>
+<p>⚠️ Never make an authorization decision on a token decoded this way.</p>
+<p>Note: when you turn off signature verification, PyJWT also turns off the
+expiry/claim checks that depend on trusting the token, so you typically pass no
+secret at all.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/02_options_verify_signature.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_options_verify_signature.py</span></div><pre>[UNVERIFIED] Claims read without checking the signature:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;roles&#x27;: [&#x27;admin&#x27;]}
+    ⚠️ Treat this data as untrusted — do NOT authorize on it.
+
+[UNVERIFIED] Even a token with a garbage signature decodes:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;roles&#x27;: [&#x27;admin&#x27;]}
+
+[VERIFIED] With the secret, the signature is checked:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;roles&#x27;: [&#x27;admin&#x27;]}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_options_verify_signature.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02 · options={&quot;verify_signature&quot;: False}.</span>
+
+<span class="sd">The signature is what makes a JWT *trustworthy*. Disabling its verification</span>
+<span class="sd">means you are reading **unauthenticated** data — anyone could have forged or</span>
+<span class="sd">tampered with it.</span>
+
+<span class="sd">Legitimate uses are narrow:</span>
+<span class="sd">  * inspecting a token&#39;s claims/header for debugging,</span>
+<span class="sd">  * reading the `kid`/`iss` to decide *which* key to then verify with.</span>
+
+<span class="sd">⚠️ Never make an authorization decision on a token decoded this way.</span>
+
+<span class="sd">Note: when you turn off signature verification, PyJWT also turns off the</span>
+<span class="sd">expiry/claim checks that depend on trusting the token, so you typically pass no</span>
+<span class="sd">secret at all.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/02_options_verify_signature.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;roles&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">]},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- Read claims WITHOUT verifying the signature ---------------------</span>
+    <span class="c1"># No key is required; PyJWT just base64url-decodes the payload.</span>
+    <span class="n">unsafe</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[UNVERIFIED] Claims read without checking the signature:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">unsafe</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    ⚠️ Treat this data as untrusted — do NOT authorize on it.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- Proof that tampering is undetectable in this mode ---------------</span>
+    <span class="c1"># Splice the (untrusted) header+payload of a token with a bogus signature.</span>
+    <span class="n">header_b64</span><span class="p">,</span> <span class="n">payload_b64</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+    <span class="n">forged</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header_b64</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">payload_b64</span><span class="si">}</span><span class="s2">.not-a-real-signature&quot;</span>
+    <span class="n">still_reads</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[UNVERIFIED] Even a token with a garbage signature decodes:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">still_reads</span><span class="p">)</span>
+
+    <span class="c1"># --- The safe path, for contrast -------------------------------------</span>
+    <span class="n">verified</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[VERIFIED] With the secret, the signature is checked:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">verified</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/02_options_verify_signature.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_options_verify_exp">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Options Verify EXP</b><span>03_options_verify_exp.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03 · options={"verify_exp": False}.</p>
+<p>By default PyJWT rejects expired tokens. You can switch that single check off
+with <code>options={"verify_exp": False}</code> while still verifying the signature and
+everything else.</p>
+<p>⚠️ Risk: accepting expired tokens defeats the purpose of <code>exp</code>. Stolen or
+long-forgotten tokens become valid forever. Use this only for narrow,
+deliberate cases (e.g. reading an expired token's claims to show a friendly
+"your session ended" message) — never as a general policy.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/03_options_verify_exp.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_options_verify_exp.py</span></div><pre>[DEFAULT] Expired token rejected: Signature has expired
+
+[verify_exp=False] Accepted the expired token:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;exp&#x27;: 1782846311}
+    ⚠️ Signature was still checked, but the deadline was ignored.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_options_verify_exp.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03 · options={&quot;verify_exp&quot;: False}.</span>
+
+<span class="sd">By default PyJWT rejects expired tokens. You can switch that single check off</span>
+<span class="sd">with ``options={&quot;verify_exp&quot;: False}`` while still verifying the signature and</span>
+<span class="sd">everything else.</span>
+
+<span class="sd">⚠️ Risk: accepting expired tokens defeats the purpose of `exp`. Stolen or</span>
+<span class="sd">long-forgotten tokens become valid forever. Use this only for narrow,</span>
+<span class="sd">deliberate cases (e.g. reading an expired token&#39;s claims to show a friendly</span>
+<span class="sd">&quot;your session ended&quot; message) — never as a general policy.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/03_options_verify_exp.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># A token that expired an hour ago.</span>
+    <span class="n">expired</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># --- Default behaviour: rejected -------------------------------------</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">expired</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[DEFAULT] Expired token rejected:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="c1"># --- Opt out of the expiry check (signature STILL verified) ----------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">expired</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_exp&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[verify_exp=False] Accepted the expired token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    ⚠️ Signature was still checked, but the deadline was ignored.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/03_options_verify_exp.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_options_verify_aud">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Options Verify AUD</b><span>04_options_verify_aud.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04 · options={"verify_aud": False}.</p>
+<p>When a token carries an <code>aud</code> claim, PyJWT verifies it <em>if</em> you pass
+<code>audience=</code>. But if you pass neither <code>audience=</code> nor disable the check, a
+token containing <code>aud</code> can raise on decode in some flows. Setting
+<code>options={"verify_aud": False}</code> explicitly skips audience validation.</p>
+<p>⚠️ Risk: skipping <code>aud</code> lets a token minted for another service be accepted by
+yours (token "audience confusion"). Only skip it when you have another reason
+to trust the token's intended target.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/04_options_verify_aud.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_options_verify_aud.py</span></div><pre>[CHECKED] Correct audience accepted: https://api.example.com
+[CHECKED] Wrong audience rejected: Audience doesn&#x27;t match
+
+[verify_aud=False] Decoded without checking `aud`:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;aud&#x27;: &#x27;https://api.example.com&#x27;}
+    ⚠️ Any audience is now accepted — beware token confusion.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_options_verify_aud.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04 · options={&quot;verify_aud&quot;: False}.</span>
+
+<span class="sd">When a token carries an `aud` claim, PyJWT verifies it *if* you pass</span>
+<span class="sd">``audience=``. But if you pass neither `audience=` nor disable the check, a</span>
+<span class="sd">token containing `aud` can raise on decode in some flows. Setting</span>
+<span class="sd">``options={&quot;verify_aud&quot;: False}`` explicitly skips audience validation.</span>
+
+<span class="sd">⚠️ Risk: skipping `aud` lets a token minted for another service be accepted by</span>
+<span class="sd">yours (token &quot;audience confusion&quot;). Only skip it when you have another reason</span>
+<span class="sd">to trust the token&#39;s intended target.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/04_options_verify_aud.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="s2">&quot;https://api.example.com&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># --- Verifying audience normally: must match -------------------------</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;https://api.example.com&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[CHECKED] Correct audience accepted:&quot;</span><span class="p">,</span> <span class="n">ok</span><span class="p">[</span><span class="s2">&quot;aud&quot;</span><span class="p">])</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;https://other.example.com&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAudienceError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[CHECKED] Wrong audience rejected:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="c1"># --- Skip the audience check entirely --------------------------------</span>
+    <span class="n">skipped</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_aud&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[verify_aud=False] Decoded without checking `aud`:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">skipped</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    ⚠️ Any audience is now accepted — beware token confusion.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/04_options_verify_aud.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_require_claims">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Require Claims</b><span>05_require_claims.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05 · options={"require": [...]} — demand specific claims.</p>
+<p>Validating a claim's <em>value</em> only happens when the claim exists. To guarantee a
+claim is even <strong>present</strong>, list it under <code>options={"require": [...]}</code>. If any
+required claim is missing, PyJWT raises
+:class:<code>jwt.MissingRequiredClaimError</code> <em>before</em> checking values.</p>
+<p>This is the right way to enforce, e.g., "every token MUST have <code>exp</code>, <code>iss</code>,
+and <code>sub</code>".</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/05_require_claims.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_require_claims.py</span></div><pre>[OK] All required claims present: [&#x27;exp&#x27;, &#x27;iss&#x27;, &#x27;sub&#x27;]
+
+[EXPECTED FAILURE] MissingRequiredClaimError:
+     Token is missing the &quot;iss&quot; claim
+    `require` guarantees presence; value checks come after.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_require_claims.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05 · options={&quot;require&quot;: [...]} — demand specific claims.</span>
+
+<span class="sd">Validating a claim&#39;s *value* only happens when the claim exists. To guarantee a</span>
+<span class="sd">claim is even **present**, list it under ``options={&quot;require&quot;: [...]}``. If any</span>
+<span class="sd">required claim is missing, PyJWT raises</span>
+<span class="sd">:class:`jwt.MissingRequiredClaimError` *before* checking values.</span>
+
+<span class="sd">This is the right way to enforce, e.g., &quot;every token MUST have `exp`, `iss`,</span>
+<span class="sd">and `sub`&quot;.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/05_require_claims.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">REQUIRED</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">,</span> <span class="s2">&quot;iss&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># --- A complete token satisfies the requirement ----------------------</span>
+    <span class="n">complete</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;https://auth.example.com&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
+        <span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">complete</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="n">REQUIRED</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[OK] All required claims present:&quot;</span><span class="p">,</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">decoded</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+
+    <span class="c1"># --- A token missing `iss` is rejected -------------------------------</span>
+    <span class="n">missing_iss</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">missing_iss</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="n">REQUIRED</span><span class="p">},</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">MissingRequiredClaimError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] MissingRequiredClaimError:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    `require` guarantees presence; value checks come after.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/05_require_claims.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_leeway">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Leeway</b><span>06_leeway.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06 · leeway — tolerating small clock differences.</p>
+<p>Servers' clocks are never perfectly in sync. A token that expired "0.5 seconds
+ago" according to your clock may still be valid by the issuer's. <code>leeway</code>
+gives time-based checks (<code>exp</code>, <code>nbf</code>, <code>iat</code>) a grace window so honest tokens
+near a boundary aren't rejected over millisecond skew.</p>
+<p>You can pass <code>leeway</code> as a number of seconds or as a
+:class:<code>datetime.timedelta</code>.</p>
+<p>⚠️ Keep leeway small (seconds, not minutes). It widens the window in which an
+expired token is still accepted.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/06_leeway.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_leeway.py</span></div><pre>[NO LEEWAY] Rejected (expired 10s ago): Signature has expired
+
+[leeway=30s] Accepted despite being 10s past exp:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;exp&#x27;: 1782849902}
+
+[leeway=30s] Still rejected when 40s past exp: Signature has expired</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_leeway.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06 · leeway — tolerating small clock differences.</span>
+
+<span class="sd">Servers&#39; clocks are never perfectly in sync. A token that expired &quot;0.5 seconds</span>
+<span class="sd">ago&quot; according to your clock may still be valid by the issuer&#39;s. ``leeway``</span>
+<span class="sd">gives time-based checks (`exp`, `nbf`, `iat`) a grace window so honest tokens</span>
+<span class="sd">near a boundary aren&#39;t rejected over millisecond skew.</span>
+
+<span class="sd">You can pass ``leeway`` as a number of seconds or as a</span>
+<span class="sd">:class:`datetime.timedelta`.</span>
+
+<span class="sd">⚠️ Keep leeway small (seconds, not minutes). It widens the window in which an</span>
+<span class="sd">expired token is still accepted.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/06_leeway.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># Expired 10 seconds ago — just over the edge.</span>
+    <span class="n">just_expired</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">10</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># --- Without leeway: rejected ----------------------------------------</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">just_expired</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[NO LEEWAY] Rejected (expired 10s ago):&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="c1"># --- With 30s leeway: accepted ---------------------------------------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">just_expired</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">leeway</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[leeway=30s] Accepted despite being 10s past exp:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="c1"># --- But leeway is finite: 40s past exp with 30s leeway still fails ---</span>
+    <span class="n">more_expired</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">40</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">more_expired</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span> <span class="n">leeway</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">30</span><span class="p">))</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[leeway=30s] Still rejected when 40s past exp:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/06_leeway.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_nested_and_namespaced_claims">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Nested And Namespaced Claims</b><span>07_nested_and_namespaced_claims.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>07 · Nested and namespaced custom claims.</p>
+<p>Two patterns you'll meet in real tokens:</p>
+<ol>
+<li>
+<p><strong>Nested objects</strong> — group related data under one key, e.g. a <code>context</code>
+   object holding tenant + device info. The value is just nested JSON.</p>
+</li>
+<li>
+<p><strong>Namespaced / URL-style keys</strong> — to avoid collisions, identity providers
+   prefix custom claims with a URI, e.g.
+   <code>"https://example.com/roles"</code>. OIDC and Auth0 use exactly this style. The
+   key is an ordinary string; the URL has no network meaning here.</p>
+</li>
+</ol>
+<p>Both decode back as plain Python dict entries.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/07_nested_and_namespaced_claims.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_nested_and_namespaced_claims.py</span></div><pre>Nested claims:
+    tenant      : acme-corp
+    device OS   : linux
+    device trust: True
+
+Namespaced claims:
+    roles: [&#x27;editor&#x27;, &#x27;billing&#x27;]
+    plan : enterprise</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_nested_and_namespaced_claims.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;07 · Nested and namespaced custom claims.</span>
+
+<span class="sd">Two patterns you&#39;ll meet in real tokens:</span>
+
+<span class="sd">1. **Nested objects** — group related data under one key, e.g. a `context`</span>
+<span class="sd">   object holding tenant + device info. The value is just nested JSON.</span>
+
+<span class="sd">2. **Namespaced / URL-style keys** — to avoid collisions, identity providers</span>
+<span class="sd">   prefix custom claims with a URI, e.g.</span>
+<span class="sd">   ``&quot;https://example.com/roles&quot;``. OIDC and Auth0 use exactly this style. The</span>
+<span class="sd">   key is an ordinary string; the URL has no network meaning here.</span>
+
+<span class="sd">Both decode back as plain Python dict entries.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/07_nested_and_namespaced_claims.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+<span class="c1"># A namespace prefix you control, used to qualify private claims.</span>
+<span class="n">NS</span> <span class="o">=</span> <span class="s2">&quot;https://example.com/claims&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span>
+        <span class="c1"># (1) nested object claim</span>
+        <span class="s2">&quot;context&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;tenant&quot;</span><span class="p">:</span> <span class="s2">&quot;acme-corp&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;device&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;os&quot;</span><span class="p">:</span> <span class="s2">&quot;linux&quot;</span><span class="p">,</span> <span class="s2">&quot;trusted&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+        <span class="p">},</span>
+        <span class="c1"># (2) namespaced / URL-style claim keys</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">NS</span><span class="si">}</span><span class="s2">/roles&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;editor&quot;</span><span class="p">,</span> <span class="s2">&quot;billing&quot;</span><span class="p">],</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">NS</span><span class="si">}</span><span class="s2">/plan&quot;</span><span class="p">:</span> <span class="s2">&quot;enterprise&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Reading nested claims -------------------------------------------</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Nested claims:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    tenant      :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;context&quot;</span><span class="p">][</span><span class="s2">&quot;tenant&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    device OS   :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;context&quot;</span><span class="p">][</span><span class="s2">&quot;device&quot;</span><span class="p">][</span><span class="s2">&quot;os&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    device trust:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;context&quot;</span><span class="p">][</span><span class="s2">&quot;device&quot;</span><span class="p">][</span><span class="s2">&quot;trusted&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Reading namespaced claims ---------------------------------------</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Namespaced claims:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    roles:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">NS</span><span class="si">}</span><span class="s2">/roles&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    plan :&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">NS</span><span class="si">}</span><span class="s2">/plan&quot;</span><span class="p">])</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/07_nested_and_namespaced_claims.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_role_based_access_demo">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Role Based Access Demo</b><span>08_role_based_access_demo.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>08 · Role-Based Access Control (RBAC) demo with JWT claims.</p>
+<p>This ties the module together: tokens carry a <code>roles</code> custom claim, and a tiny
+<code>authorize()</code> helper enforces that a caller holds a required role before an
+action runs.</p>
+<p>The flow mirrors a real API gateway:
+    1. Verify the token's signature (and any registered claims).
+    2. Read the <code>roles</code> claim from the trusted payload.
+    3. Allow or deny based on the required role for the operation.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/08_role_based_access_demo.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_role_based_access_demo.py</span></div><pre>Required role for deleting a record: &#x27;admin&#x27;
+
+[ALLOW] alice deletes record: alice has &#x27;admin&#x27;.
+[DENY]  bob deletes record: user bob has roles [&#x27;editor&#x27;]; &#x27;admin&#x27; required
+
+Required role for editing a record: &#x27;editor&#x27;
+
+[ALLOW] alice edits record: alice has &#x27;editor&#x27;.
+[ALLOW] bob edits record: bob has &#x27;editor&#x27;.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_role_based_access_demo.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;08 · Role-Based Access Control (RBAC) demo with JWT claims.</span>
+
+<span class="sd">This ties the module together: tokens carry a `roles` custom claim, and a tiny</span>
+<span class="sd">``authorize()`` helper enforces that a caller holds a required role before an</span>
+<span class="sd">action runs.</span>
+
+<span class="sd">The flow mirrors a real API gateway:</span>
+<span class="sd">    1. Verify the token&#39;s signature (and any registered claims).</span>
+<span class="sd">    2. Read the `roles` claim from the trusted payload.</span>
+<span class="sd">    3. Allow or deny based on the required role for the operation.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/04-custom-claims-and-validation/08_role_based_access_demo.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">ISSUER</span> <span class="o">=</span> <span class="s2">&quot;https://auth.example.com&quot;</span>
+<span class="n">AUDIENCE</span> <span class="o">=</span> <span class="s2">&quot;https://api.example.com&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">issue_token</span><span class="p">(</span><span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">roles</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Mint a signed token for a user carrying their roles.&quot;&quot;&quot;</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="n">ISSUER</span><span class="p">,</span>
+            <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">AUDIENCE</span><span class="p">,</span>
+            <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="n">user_id</span><span class="p">,</span>
+            <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
+            <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">15</span><span class="p">),</span>
+            <span class="s2">&quot;roles&quot;</span><span class="p">:</span> <span class="n">roles</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">AccessDenied</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Raised when a verified token lacks the required role.&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">authorize</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">required_role</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verify a token and ensure it grants `required_role`.</span>
+
+<span class="sd">    Returns the decoded payload on success; raises on failure.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Step 1: fully verify the token (signature + iss/aud + exp).</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">issuer</span><span class="o">=</span><span class="n">ISSUER</span><span class="p">,</span>
+        <span class="n">audience</span><span class="o">=</span><span class="n">AUDIENCE</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># Step 2: read roles from the *trusted* payload.</span>
+    <span class="n">roles</span> <span class="o">=</span> <span class="n">payload</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;roles&quot;</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="c1"># Step 3: enforce the requirement.</span>
+    <span class="k">if</span> <span class="n">required_role</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">roles</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">AccessDenied</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;user </span><span class="si">{</span><span class="n">payload</span><span class="p">[</span><span class="s1">&#39;sub&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> has roles </span><span class="si">{</span><span class="n">roles</span><span class="si">}</span><span class="s2">; &#39;</span><span class="si">{</span><span class="n">required_role</span><span class="si">}</span><span class="s2">&#39; required&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">payload</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">attempt</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">required_role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Try an authorized action and print the outcome.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">authorize</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">required_role</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[ALLOW] </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">payload</span><span class="p">[</span><span class="s1">&#39;sub&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> has &#39;</span><span class="si">{</span><span class="n">required_role</span><span class="si">}</span><span class="s2">&#39;.&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">AccessDenied</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[DENY]  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[DENY]  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: invalid token (</span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">).&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">admin_token</span> <span class="o">=</span> <span class="n">issue_token</span><span class="p">(</span><span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;editor&quot;</span><span class="p">])</span>
+    <span class="n">editor_token</span> <span class="o">=</span> <span class="n">issue_token</span><span class="p">(</span><span class="s2">&quot;bob&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;editor&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Required role for deleting a record: &#39;admin&#39;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">attempt</span><span class="p">(</span><span class="n">admin_token</span><span class="p">,</span> <span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;alice deletes record&quot;</span><span class="p">)</span>   <span class="c1"># allowed</span>
+    <span class="n">attempt</span><span class="p">(</span><span class="n">editor_token</span><span class="p">,</span> <span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;bob deletes record&quot;</span><span class="p">)</span>    <span class="c1"># denied</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Required role for editing a record: &#39;editor&#39;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">attempt</span><span class="p">(</span><span class="n">admin_token</span><span class="p">,</span> <span class="s2">&quot;editor&quot;</span><span class="p">,</span> <span class="s2">&quot;alice edits record&quot;</span><span class="p">)</span>    <span class="c1"># allowed (has editor)</span>
+    <span class="n">attempt</span><span class="p">(</span><span class="n">editor_token</span><span class="p">,</span> <span class="s2">&quot;editor&quot;</span><span class="p">,</span> <span class="s2">&quot;bob edits record&quot;</span><span class="p">)</span>     <span class="c1"># allowed</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/04-custom-claims-and-validation/08_role_based_access_demo.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="03-registered-claims.html"><div class="dir">← Previous</div><div class="ttl">03 · Module 03 · Registered Claims</div></a><a class="next" href="05-hmac-algorithms.html"><div class="dir">Next →</div><div class="ttl">05 · Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

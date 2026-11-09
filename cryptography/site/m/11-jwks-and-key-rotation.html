@@ -1,0 +1,1145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 11 · JWKS &amp; Key Rotation · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html" class="active"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>11 · Module 11 · JWKS &amp; Key Rotation</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#34d399,#10b981)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#34d399;border-color:#34d39955;background:#34d39911">Module 11</span>
+  <h1 style="margin-top:18px">Module 11 · JWKS &amp; Key Rotation</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>When Google, Microsoft, or any OIDC provider signs a token with a <strong>private</strong> key, the whole world needs a way to find the matching <strong>public</strong> key to verify it — without phoning the provider's support desk. The answer is delightfully boring: the provider publishes its public keys as <strong>plain JSON on an HTTPS URL</strong>. That document is a <strong>JWKS</strong> (JSON Web Key Set), and each entry inside it is a <strong>JWK</strong> (JSON Web Key). A JWK is just a public key turned inside-out into JSON fields: <code>kty</code> (key type), <code>n</code> and <code>e</code> (the RSA modulus and exponent, base64url-encoded), plus metadata like <code>kid</code> (key ID), <code>use</code>, and <code>alg</code>. There is no secret in it — that's the entire point.</p>
+<p>The magic glue is the <strong><code>kid</code></strong>. When a token is signed, the provider stamps the signing key's <code>kid</code> into the token's <em>header</em>. So verification becomes a lookup: read the unverified header, pull out the <code>kid</code>, find the JWK in the set whose <code>kid</code> matches, turn that JWK back into a usable key, and only <em>then</em> run <code>jwt.decode</code>. PyJWT exposes this as <code>PyJWKSet.from_dict(jwks)</code> to load the set and <code>jwks_set[kid].key</code> to grab the verification key. Under the hood <code>RSAAlgorithm.to_jwk()</code> serializes a key into JWK JSON and <code>RSAAlgorithm.from_jwk()</code> reverses it.</p>
+<p><code>PyJWKClient</code> is <em>not</em> a new algorithm or protocol — it is a thin convenience wrapper that adds exactly two things to the flow above: <strong>fetch the JWKS over HTTPS</strong> and <strong>cache it</strong> so you aren't hammering the <code>jwks_uri</code> on every request. <code>get_signing_key_from_jwt(token)</code> internally does <code>get_unverified_header → kid → lookup → return PyJWK</code>. That's it. Module 11 proves this by reimplementing the method by hand against a local in-memory set.</p>
+<p>Because a <em>set</em> can hold many keys at once, <strong>key rotation</strong> becomes downtime-free: publish the old and new keys together, switch signing to the new key, and only retire the old key once every token it signed has expired. The overlap window is what keeps verification from ever breaking.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>A JWKS is like a company's public lobby directory of notary stamps. Every notarized document carries a stamp number (<code>kid</code>). To check a document is genuine you don't call the notary — you look up that stamp number in the public directory, compare the impression, and you're done. When the firm hires a new notary, they simply add the new stamp to the directory while leaving the retiring notary's stamp posted until their last documents expire.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li>A provider generates one or more RSA key pairs, each assigned a unique <code>kid</code>.</li>
+<li>Each <strong>public</strong> key is serialized to JWK JSON via <code>RSAAlgorithm.to_jwk()</code>, then bundled into <code>{"keys": [...]}</code> — the JWKS.</li>
+<li>A token is signed with a <strong>private</strong> key, and that key's <code>kid</code> is written into the token header (<code>headers={"kid": "key-a"}</code>).</li>
+<li>The verifier calls <code>jwt.get_unverified_header(token)</code> to read the <code>kid</code> <em>without</em> trusting anything yet.</li>
+<li><code>PyJWKSet.from_dict(jwks)</code> parses the set; <code>jwks_set[kid]</code> returns the matching <code>PyJWK</code>, and <code>.key</code> yields a ready cryptographic key object.</li>
+<li><code>jwt.decode(token, signing_key.key, algorithms=["RS256"])</code> performs the real signature check against that public key.</li>
+<li><code>PyJWKClient</code> wraps steps 4–5 with an HTTPS fetch plus an in-memory cache.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>01_what_is_a_jwk.py</code>, the JWK is <em>human-readable JSON</em> with no private material — you can paste it anywhere safely.</li>
+<li>In <code>04_pyjwkset_from_dict.py</code>, indexing the set by string <code>kid</code> (<code>jwks_set["key-a"]</code>) returns a <code>PyJWK</code> object; <code>.key</code> is what <code>jwt.decode</code> actually wants.</li>
+<li><code>06_key_rotation_flow.py</code> shows the overlap phase where <strong>both</strong> an A-signed and a B-signed token verify simultaneously — and the moment A is dropped, lingering A-tokens finally fail.</li>
+<li><code>07_pyjwkclient_explained.py</code> reimplements <code>get_signing_key_from_jwt</code> in three lines, revealing the "client" as pure convenience around a flow you already know.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"A JWKS contains secrets."</strong> No — it contains only <em>public</em> keys. Publishing it is intentional and safe.</li>
+<li><strong>"PyJWKClient does something cryptographically special."</strong> It only fetches and caches JSON; the verification logic is identical to manual <code>kid</code> lookup.</li>
+<li><strong>"Rotation means swapping one key for another instantly."</strong> Real rotation <em>overlaps</em> keys so in-flight tokens keep verifying until they expire.</li>
+<li><strong>"You can skip <code>algorithms=[...]</code> because the right key was selected."</strong> Never — always pin the expected algorithm even after resolving the key by <code>kid</code>.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-11-jwks-key-rotation">🔑 Module 11 · JWKS &amp; Key Rotation</h1>
+<blockquote>
+<p>How does Google verify a token <em>you've</em> never sent it before, signed with a key
+it rotated last week? The answer is <strong>JWKS</strong> — a published set of public keys,
+addressable by <code>kid</code>. This module builds the whole machine locally, no network
+required.</p>
+</blockquote>
+<hr />
+<h2 id="the-big-idea">🧠 The big idea</h2>
+<p>Asymmetric tokens (RS256, ES256, …) are verified with a <strong>public</strong> key. Providers
+need a standard, web-friendly way to <em>publish</em> those public keys so any client
+can verify tokens. That standard is:</p>
+<ul>
+<li><strong>JWK</strong> (JSON Web Key) — one key, expressed as JSON (<code>kty</code>, <code>n</code>, <code>e</code>, <code>kid</code>, …).</li>
+<li><strong>JWKS</strong> (JSON Web Key <em>Set</em>) — <code>{"keys": [jwk, jwk, …]}</code>, served at a
+  <code>jwks_uri</code>.</li>
+<li><strong><code>PyJWKSet</code> / <code>PyJWKClient</code></strong> — PyJWT's tools to load a JWKS and pick the right
+  key for a token by its <code>kid</code>.</li>
+</ul>
+<p>Because a set can hold <strong>many</strong> keys at once, providers can rotate keys with zero
+downtime: publish old + new together, switch signing to the new key, then drop
+the old one once its tokens have expired.</p>
+<hr />
+<h2 id="jwks-verification-flow">🔄 JWKS verification flow</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    T[Incoming token] --&gt; H[get_unverified_header]
+    H --&gt; K{kid}
+    subgraph JWKS [PyJWKSet from jwks_uri]
+        A[PyJWK key-a]
+        B[PyJWK key-b]
+    end
+    K --&gt;|matches| B
+    B --&gt; KEY[signing_key.key]
+    KEY --&gt; D[jwt.decode algorithms=RS256]
+    D --&gt; OK[✅ verified claims]</div></div>
+<p><code>PyJWKClient</code> is just this flow plus <strong>"fetch the JWKS over HTTPS and cache it."</strong></p>
+<hr />
+<h2 id="key-rotation-timeline">🔁 Key rotation timeline</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    P1[&quot;Phase 1&lt;br/&gt;JWKS = {A}&lt;br/&gt;sign with A&quot;]
+    P2[&quot;Phase 2 · overlap&lt;br/&gt;JWKS = {A, B}&lt;br/&gt;sign with B&quot;]
+    P3[&quot;Phase 3&lt;br/&gt;JWKS = {B}&lt;br/&gt;A retired&quot;]
+    P1 --&gt; P2 --&gt; P3</div></div>
+<p>During Phase 2, <strong>both</strong> old (A-signed) and new (B-signed) tokens verify. Only
+when A is dropped in Phase 3 do lingering A-tokens finally fail.</p>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_what_is_a_jwk"><code>01_what_is_a_jwk.py</code></a></td>
+<td>What a JWK is; build one with <code>RSAAlgorithm.to_jwk</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_jwk_from_rsa_key"><code>02_jwk_from_rsa_key.py</code></a></td>
+<td>Round-trip a key: <code>to_jwk</code> → <code>from_jwk</code>, then verify</td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_build_a_jwks"><code>03_build_a_jwks.py</code></a></td>
+<td>Assemble a <code>{"keys": [...]}</code> JWKS from two RSA keys</td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_pyjwkset_from_dict"><code>04_pyjwkset_from_dict.py</code></a></td>
+<td>Load a JWKS with <code>PyJWKSet.from_dict</code>; access keys by <code>kid</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_select_key_by_kid"><code>05_select_key_by_kid.py</code></a></td>
+<td><code>kid</code> → matching <code>PyJWK</code> → verify</td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_key_rotation_flow"><code>06_key_rotation_flow.py</code></a></td>
+<td>Full rotation simulation across three phases</td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_pyjwkclient_explained"><code>07_pyjwkclient_explained.py</code></a></td>
+<td>What <code>PyJWKClient</code> does, reproduced manually (+ real snippet)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-them">▶️ Run them</h3>
+<div class="codehl"><pre><span></span><code><span class="c1"># from the repo root: /home/astro/catalyst/jwt-test</span>
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/01_what_is_a_jwk.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/02_jwk_from_rsa_key.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/03_build_a_jwks.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/04_pyjwkset_from_dict.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/05_select_key_by_kid.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/06_key_rotation_flow.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/11-jwks-and-key-rotation/07_pyjwkclient_explained.py
+</code></pre></div>
+
+<hr />
+<h2 id="the-key-pyjwt-apis">🧩 The key PyJWT APIs</h2>
+<table>
+<thead>
+<tr>
+<th>API</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>jwt.algorithms.RSAAlgorithm.to_jwk(public_key)</code></td>
+<td>Key object → JWK JSON string</td>
+</tr>
+<tr>
+<td><code>jwt.algorithms.RSAAlgorithm.from_jwk(jwk_json)</code></td>
+<td>JWK JSON → key object</td>
+</tr>
+<tr>
+<td><code>jwt.PyJWKSet.from_dict(jwks)</code></td>
+<td>JWKS dict → set of <code>PyJWK</code> objects</td>
+</tr>
+<tr>
+<td><code>jwks_set[kid]</code> / <code>jwks_set.keys</code></td>
+<td>Select a <code>PyJWK</code> by <code>kid</code> / iterate all</td>
+</tr>
+<tr>
+<td><code>PyJWK.key</code></td>
+<td>The ready-to-use verification key for <code>jwt.decode</code></td>
+</tr>
+<tr>
+<td><code>PyJWKClient(uri).get_signing_key_from_jwt(token)</code></td>
+<td>Fetch+cache JWKS, return signing key (network)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="key-takeaways">✅ Key takeaways</h2>
+<ul>
+<li>A <strong>JWK</strong> is a key as JSON; a <strong>JWKS</strong> is a list of JWKs under <code>"keys"</code>.</li>
+<li><code>kid</code> ties a token to a specific key in the set — rotation depends on it.</li>
+<li><code>PyJWKSet.from_dict</code> + <code>jwks_set[kid].key</code> is the manual JWKS verification path.</li>
+<li><code>PyJWKClient</code> adds HTTPS fetching and caching on top of that exact path.</li>
+<li>Rotate by <strong>overlapping</strong> keys, then dropping the old one after its tokens age
+  out.</li>
+</ul>
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>No <code>kid</code> in the token (or the set).</strong> If the token's <code>kid</code> isn't published,
+  verification must fail — handle the lookup miss explicitly.</li>
+<li><strong>Caching too aggressively.</strong> If you cache a JWKS forever, you'll reject tokens
+  signed by a freshly rotated key. <code>PyJWKClient</code> caches with sane defaults;
+  respect rotation.</li>
+<li><strong>Re-fetching on every request.</strong> The opposite mistake — hammering the
+  <code>jwks_uri</code>. Cache it.</li>
+<li><strong>Trusting the JWKS source.</strong> Always fetch over HTTPS from the provider's
+  well-known URL; a poisoned JWKS means forged tokens.</li>
+<li><strong>Forgetting the algorithm whitelist.</strong> Even with the right key, always pass
+  <code>algorithms=["RS256"]</code> (or your expected set) to <code>jwt.decode</code>.</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 7 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_what_is_a_jwk" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>What Is A JWK</b><span>01_what_is_a_jwk.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01 · What is a JWK?</p>
+<p>A <strong>JWK</strong> (JSON Web Key, RFC 7517) is just a JSON representation of a
+cryptographic key. Instead of a PEM blob, a key becomes a JSON object whose
+fields depend on the key type (<code>kty</code>):</p>
+<p>For an RSA public key you'll see:
+- <code>kty</code> — key type, <code>"RSA"</code>.
+- <code>n</code>   — the modulus (base64url).
+- <code>e</code>   — the public exponent (base64url, usually <code>"AQAB"</code> = 65537).
+- optional metadata like <code>kid</code> (key id), <code>use</code> (<code>"sig"</code>), <code>alg</code>.</p>
+<p>Why bother? Because JSON is web-native. A server can publish its public keys as a
+JWK <strong>Set</strong> at an HTTPS URL, and any client can fetch and parse them with nothing
+but a JSON parser — no PEM/ASN.1 tooling required. That's the whole basis of
+JWKS.</p>
+<p>PyJWT can produce a JWK straight from a cryptography public-key object via
+<code>jwt.algorithms.RSAAlgorithm.to_jwk</code>. This script generates a keypair and
+prints the resulting JWK.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/01_what_is_a_jwk.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_what_is_a_jwk.py</span></div><pre>RSA public key as a JWK:
+{
+  &quot;kty&quot;: &quot;RSA&quot;,
+  &quot;key_ops&quot;: [
+    &quot;verify&quot;
+  ],
+  &quot;n&quot;: &quot;1g6jFeomNoVnDSLUrZO2F3_GGacYlnMEvEZ6BrhpHTRcmvrw6QJaXrEUJHM29R-RR4w26zkdsnvnrz6icp50Bo6gbtVxHt784T-ksnBEkaJ5IZVFmd-4hNXVk1GwHR-H-C1oz297JOKapu2Ih91kDCoJvby_QPrOhQcqVjuMLt4eCP_44WtGvVemuHSpg8Ju4fN0W-sgU5uzjjgT8AhbC3DWeZsOmgs9b8Z9H82abI60fAN9SiLegXRFLPc9xKSsl59QXGd7BawTppGGlkMjNJB5HNOmacrUHF4vi0_zJEwGa0uYTeMB4QQ2hiitAwBs5BRPudfaaUlVMdfApTBlPQ&quot;,
+  &quot;e&quot;: &quot;AQAB&quot;
+}
+
+Field-by-field:
+  kty = &#x27;RSA&#x27;   (key type — RSA)
+  e   = &#x27;AQAB&#x27;   (public exponent, base64url; &#x27;AQAB&#x27; == 65537)
+  n   = &lt;342 base64url chars&gt;  (the 2048-bit modulus)
+
+✅ A JWK is just a key expressed as JSON — web-native and easy to publish.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_what_is_a_jwk.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01 · What is a JWK?</span>
+
+<span class="sd">A **JWK** (JSON Web Key, RFC 7517) is just a JSON representation of a</span>
+<span class="sd">cryptographic key. Instead of a PEM blob, a key becomes a JSON object whose</span>
+<span class="sd">fields depend on the key type (``kty``):</span>
+
+<span class="sd">For an RSA public key you&#39;ll see:</span>
+<span class="sd">- ``kty`` — key type, ``&quot;RSA&quot;``.</span>
+<span class="sd">- ``n``   — the modulus (base64url).</span>
+<span class="sd">- ``e``   — the public exponent (base64url, usually ``&quot;AQAB&quot;`` = 65537).</span>
+<span class="sd">- optional metadata like ``kid`` (key id), ``use`` (``&quot;sig&quot;``), ``alg``.</span>
+
+<span class="sd">Why bother? Because JSON is web-native. A server can publish its public keys as a</span>
+<span class="sd">JWK **Set** at an HTTPS URL, and any client can fetch and parse them with nothing</span>
+<span class="sd">but a JSON parser — no PEM/ASN.1 tooling required. That&#39;s the whole basis of</span>
+<span class="sd">JWKS.</span>
+
+<span class="sd">PyJWT can produce a JWK straight from a cryptography public-key object via</span>
+<span class="sd">``jwt.algorithms.RSAAlgorithm.to_jwk``. This script generates a keypair and</span>
+<span class="sd">prints the resulting JWK.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/01_what_is_a_jwk.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Generate an RSA keypair locally (no network, no files).</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="c1"># Convert the PUBLIC key into a JWK. to_jwk returns a JSON *string*.</span>
+    <span class="n">jwk_json</span> <span class="o">=</span> <span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">)</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">jwk_json</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RSA public key as a JWK:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwk</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Explain the fields we got back.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Field-by-field:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  kty = </span><span class="si">{</span><span class="n">jwk</span><span class="p">[</span><span class="s1">&#39;kty&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">   (key type — RSA)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  e   = </span><span class="si">{</span><span class="n">jwk</span><span class="p">[</span><span class="s1">&#39;e&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">   (public exponent, base64url; &#39;AQAB&#39; == 65537)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  n   = &lt;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">jwk</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> base64url chars&gt;  (the 2048-bit modulus)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ A JWK is just a key expressed as JSON — web-native and easy to publish.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/01_what_is_a_jwk.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_jwk_from_rsa_key">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>JWK From RSA Key</b><span>02_jwk_from_rsa_key.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02 · Round-tripping an RSA key through a JWK.</p>
+<p>A JWK isn't a one-way export format — it's a faithful representation you can
+convert <em>back</em> into a usable key. This is exactly what a verifier does: it
+receives a JWK (as JSON), turns it into a public key, and verifies tokens with it.</p>
+<p>The two functions:
+- <code>RSAAlgorithm.to_jwk(public_key)</code>  -&gt; JWK JSON string.
+- <code>RSAAlgorithm.from_jwk(jwk_json)</code>  -&gt; a cryptography public-key object.</p>
+<p>This script:
+    1. Generates an RSA keypair.
+    2. Signs a token with the PRIVATE key (RS256).
+    3. Exports the PUBLIC key to a JWK, then imports it back with <code>from_jwk</code>.
+    4. Verifies the token using the <em>round-tripped</em> key — proving it's identical.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/02_jwk_from_rsa_key.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_jwk_from_rsa_key.py</span></div><pre>Token signed with RS256 private key:
+eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiZGF2ZSJ9.FzcKhLW3kDenBJs3l67ThDOzlTIRwtWoPQ61sJS03cTvCnjnqXGni_q0byRcewRK3Ej1XoD5cpq5t0tveG1YJVEvW3ozlkcSUGmhPwN9W3sBMl_ktm23XM-hsnOCq3juT1paMHIK7ORPfNx9U3Owq_if5iowq0Ol74KsqhYOAQOzlhnzPnMgL4YP5egkxk6El1Wy3os4WcigGIoLlGXBQRWIslst_6z5YTieUEk_4jnhoA5fKrvgesuOu8ng4s8RKxvSqjMD1s6HHuc4416bBFnZgxKTXsXk6WZTVGA_umrSpdCLHAxtKvdpOsQcqYMxDZsOakMzTIlq3Lu3gCMjlw
+
+Public key as JWK:
+{
+  &quot;kty&quot;: &quot;RSA&quot;,
+  &quot;key_ops&quot;: [
+    &quot;verify&quot;
+  ],
+  &quot;n&quot;: &quot;mrZ8Lt2dZ7nLE4nr0UZgbFchLO_jn3N9vknSRtqdrFjNMJhdV6oUgK_4XWFw2SVUbRifD3wNjI7-T0v5ez88Q-6eN4YN54WWU3u_qpXmNjnLwcxQAep037aTfytDVm-8Xc3dceMRXQJsZymsVhJPRYXSPw5VFPmVwxt76ms9S_0xlTy5VvjVWXgJ66amx2Q75DK0HAMXL3zHoZIBtrwL7eKkpJ7XFHzq0SvGYkB_-nFQpzs3geNaLiqlmrQD4IefGLq7YMwFFDkb3zmm4aeMsroDYgSQaEIL6OqsIB8cMhDpS-WMRcrzRSyOGX9neF2h9fKMEyo0vsc9pk9r4EhI5Q&quot;,
+  &quot;e&quot;: &quot;AQAB&quot;
+}
+
+✅ Verified with round-tripped JWK key: {&#x27;user&#x27;: &#x27;dave&#x27;}
+   to_jwk -&gt; from_jwk preserves the key perfectly.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_jwk_from_rsa_key.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02 · Round-tripping an RSA key through a JWK.</span>
+
+<span class="sd">A JWK isn&#39;t a one-way export format — it&#39;s a faithful representation you can</span>
+<span class="sd">convert *back* into a usable key. This is exactly what a verifier does: it</span>
+<span class="sd">receives a JWK (as JSON), turns it into a public key, and verifies tokens with it.</span>
+
+<span class="sd">The two functions:</span>
+<span class="sd">- ``RSAAlgorithm.to_jwk(public_key)``  -&gt; JWK JSON string.</span>
+<span class="sd">- ``RSAAlgorithm.from_jwk(jwk_json)``  -&gt; a cryptography public-key object.</span>
+
+<span class="sd">This script:</span>
+<span class="sd">    1. Generates an RSA keypair.</span>
+<span class="sd">    2. Signs a token with the PRIVATE key (RS256).</span>
+<span class="sd">    3. Exports the PUBLIC key to a JWK, then imports it back with ``from_jwk``.</span>
+<span class="sd">    4. Verifies the token using the *round-tripped* key — proving it&#39;s identical.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/02_jwk_from_rsa_key.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># 1. Keypair.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="c1"># 2. Sign with the private key.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;dave&quot;</span><span class="p">},</span> <span class="n">private_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token signed with RS256 private key:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># 3. Export public key -&gt; JWK -&gt; back to a key object.</span>
+    <span class="n">jwk_json</span> <span class="o">=</span> <span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Public key as JWK:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">jwk_json</span><span class="p">),</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="n">roundtripped_key</span> <span class="o">=</span> <span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">from_jwk</span><span class="p">(</span><span class="n">jwk_json</span><span class="p">)</span>
+
+    <span class="c1"># 4. Verify using the key we reconstructed from the JWK.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">roundtripped_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ Verified with round-tripped JWK key: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   to_jwk -&gt; from_jwk preserves the key perfectly.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/02_jwk_from_rsa_key.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_build_a_jwks">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Build A JWKS</b><span>03_build_a_jwks.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03 · Building a JWKS document.</p>
+<p>A <strong>JWKS</strong> (JSON Web Key <em>Set</em>, RFC 7517) is simply a JSON object with one field,
+<code>keys</code>, whose value is a list of JWKs:</p>
+<div class="codehl"><pre><span></span><code>{&quot;keys&quot;: [ &lt;jwk1&gt;, &lt;jwk2&gt;, ... ]}
+</code></pre></div>
+
+<p>This is what identity providers publish at their <code>jwks_uri</code> (e.g.
+<code>https://.../discovery/v2.0/keys</code>). Having <em>multiple</em> keys in the set is the
+whole point: it lets a provider serve an old key and a new key simultaneously
+during rotation, so tokens signed by either remain verifiable.</p>
+<p>Each key needs a unique <code>kid</code> so tokens can reference it. <code>to_jwk</code> doesn't add
+a <code>kid</code> for us, so we attach one to each JWK ourselves.</p>
+<p>This script generates two RSA keypairs and assembles a two-key JWKS, entirely
+locally.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/03_build_a_jwks.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_build_a_jwks.py</span></div><pre>JWKS document ({&#x27;keys&#x27;: [...]}):
+{
+  &quot;keys&quot;: [
+    {
+      &quot;kty&quot;: &quot;RSA&quot;,
+      &quot;key_ops&quot;: [
+        &quot;verify&quot;
+      ],
+      &quot;n&quot;: &quot;vHUitD8Ywn9TQ1wmiLdn6AZx37Sccs05aXiIH3dlPG1L_cd12rEzOHKFZytsauDaYmEhuqXK-7_eHJ_aBCJsEdRz8EK5IoxAYkVam0x1ZVPYfnRreeEr4FJDGwfiJtJvJujcbPSOSh1ImzUGzDrlAZDdjs3nBytsZW7qYEzJyR9v3bTmoeMR5VQgru9IIUHJ_2lfogfDmWMdADcfJP_ZOQfkwpus0anVltCSWeSMVuG0b7FeoWDdTsfmVgUmDGK2OMR8lXpzXN5AjpAomWK26feVh4EY7h_OWCFdNovWhYFhrXQuY-JO_hOWaKIhLg1OvOqqS2RhrxUHflAPHdu_Cw&quot;,
+      &quot;e&quot;: &quot;AQAB&quot;,
+      &quot;kid&quot;: &quot;key-a&quot;,
+      &quot;use&quot;: &quot;sig&quot;,
+      &quot;alg&quot;: &quot;RS256&quot;
+    },
+    {
+      &quot;kty&quot;: &quot;RSA&quot;,
+      &quot;key_ops&quot;: [
+        &quot;verify&quot;
+      ],
+      &quot;n&quot;: &quot;9HafpqiBKPNMZ2XITotSew-A49zcYQw6PTFl9izIcOrEwwMirJigLL0nxx0K9gcF7aBcTAXpAWTO1nobWXTniFxRIXRRLPycPGtVerzGHLwRnhvbcH0ghjffLG4oUGK7HJk2iI8QAbVWgxop-z9Xe-4h9-SmBOGQutpNlUqeiOLNbybJTFjP7WvbVv5nDVDMFCqCWULaXewmk-kY396n-FwokkLXstOLaP_40K1PQP291vFL8Cr28IE1UGbHjkLhFV36K9vkz8tri_Jbe4QrGh9kVwKVZIm5jdqxawldIbrSauvlFMIRJcysZmBmQniq1LTt7U65ACDXlXNLI2NhRw&quot;,
+      &quot;e&quot;: &quot;AQAB&quot;,
+      &quot;kid&quot;: &quot;key-b&quot;,
+      &quot;use&quot;: &quot;sig&quot;,
+      &quot;alg&quot;: &quot;RS256&quot;
+    }
+  ]
+}
+
+Number of keys in the set: 2
+kids present: [&#x27;key-a&#x27;, &#x27;key-b&#x27;]
+
+✅ A JWKS is just a list of JWKs under a &#x27;keys&#x27; field, each with its own kid.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_build_a_jwks.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03 · Building a JWKS document.</span>
+
+<span class="sd">A **JWKS** (JSON Web Key *Set*, RFC 7517) is simply a JSON object with one field,</span>
+<span class="sd">``keys``, whose value is a list of JWKs:</span>
+
+<span class="sd">    {&quot;keys&quot;: [ &lt;jwk1&gt;, &lt;jwk2&gt;, ... ]}</span>
+
+<span class="sd">This is what identity providers publish at their ``jwks_uri`` (e.g.</span>
+<span class="sd">``https://.../discovery/v2.0/keys``). Having *multiple* keys in the set is the</span>
+<span class="sd">whole point: it lets a provider serve an old key and a new key simultaneously</span>
+<span class="sd">during rotation, so tokens signed by either remain verifiable.</span>
+
+<span class="sd">Each key needs a unique ``kid`` so tokens can reference it. ``to_jwk`` doesn&#39;t add</span>
+<span class="sd">a ``kid`` for us, so we attach one to each JWK ourselves.</span>
+
+<span class="sd">This script generates two RSA keypairs and assembles a two-key JWKS, entirely</span>
+<span class="sd">locally.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/03_build_a_jwks.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">public_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert an RSA public key to a JWK dict and tag it with kid/use/alg.&quot;&quot;&quot;</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">))</span>
+    <span class="c1"># Add the metadata a real JWKS carries.</span>
+    <span class="n">jwk</span><span class="p">[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">kid</span>
+    <span class="n">jwk</span><span class="p">[</span><span class="s2">&quot;use&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;sig&quot;</span>   <span class="c1"># this key is for signatures (not encryption)</span>
+    <span class="n">jwk</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;RS256&quot;</span>
+    <span class="k">return</span> <span class="n">jwk</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Two independent keypairs.</span>
+    <span class="n">key_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">key_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+
+    <span class="n">jwks</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;keys&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="n">kid</span><span class="o">=</span><span class="s2">&quot;key-a&quot;</span><span class="p">),</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="n">kid</span><span class="o">=</span><span class="s2">&quot;key-b&quot;</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;JWKS document ({&#39;keys&#39;: [...]}):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwks</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of keys in the set: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">jwks</span><span class="p">[</span><span class="s1">&#39;keys&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;kids present: </span><span class="si">{</span><span class="p">[</span><span class="n">k</span><span class="p">[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">jwks</span><span class="p">[</span><span class="s1">&#39;keys&#39;</span><span class="p">]]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ A JWKS is just a list of JWKs under a &#39;keys&#39; field, each with its own kid.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/03_build_a_jwks.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_pyjwkset_from_dict">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Pyjwkset From Dict</b><span>04_pyjwkset_from_dict.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04 · Loading a JWKS with <code>jwt.PyJWKSet.from_dict</code>.</p>
+<p>You <em>could</em> parse a JWKS by hand and call <code>RSAAlgorithm.from_jwk</code> on each entry
+— but PyJWT gives you a purpose-built class. <code>jwt.PyJWKSet.from_dict(jwks)</code>
+takes the raw JWKS dict and returns a <code>PyJWKSet</code> whose <code>.keys</code> is a list of
+<code>PyJWK</code> objects. Each <code>PyJWK</code> lazily turns its JWK into a real key, exposed as
+<code>.key</code> (ready to hand straight to <code>jwt.decode</code>).</p>
+<p>This script builds a local JWKS, loads it with <code>from_dict</code>, and shows two ways
+to reach a key:
+- iterating <code>jwks_set.keys</code> and reading each <code>.key_id</code> / <code>.key</code>;
+- indexing by kid with <code>jwks_set[kid]</code>.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/04_pyjwkset_from_dict.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_pyjwkset_from_dict.py</span></div><pre>Loaded a PyJWKSet with 2 PyJWK(s).
+
+Iterating jwks_set.keys:
+  kid=&#x27;key-a&#x27;    -&gt; key object RSAPublicKey
+  kid=&#x27;key-b&#x27;    -&gt; key object RSAPublicKey
+
+jwks_set[&#x27;key-b&#x27;] -&gt; PyJWK with kid=&#x27;key-b&#x27;
+  chosen.key is a usable verification key: RSAPublicKey
+
+✅ PyJWKSet.from_dict parses a JWKS and exposes ready-to-use PyJWK keys.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_pyjwkset_from_dict.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04 · Loading a JWKS with ``jwt.PyJWKSet.from_dict``.</span>
+
+<span class="sd">You *could* parse a JWKS by hand and call ``RSAAlgorithm.from_jwk`` on each entry</span>
+<span class="sd">— but PyJWT gives you a purpose-built class. ``jwt.PyJWKSet.from_dict(jwks)``</span>
+<span class="sd">takes the raw JWKS dict and returns a ``PyJWKSet`` whose ``.keys`` is a list of</span>
+<span class="sd">``PyJWK`` objects. Each ``PyJWK`` lazily turns its JWK into a real key, exposed as</span>
+<span class="sd">``.key`` (ready to hand straight to ``jwt.decode``).</span>
+
+<span class="sd">This script builds a local JWKS, loads it with ``from_dict``, and shows two ways</span>
+<span class="sd">to reach a key:</span>
+<span class="sd">- iterating ``jwks_set.keys`` and reading each ``.key_id`` / ``.key``;</span>
+<span class="sd">- indexing by kid with ``jwks_set[kid]``.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/04_pyjwkset_from_dict.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">public_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">))</span>
+    <span class="n">jwk</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">,</span> <span class="s2">&quot;use&quot;</span><span class="p">:</span> <span class="s2">&quot;sig&quot;</span><span class="p">,</span> <span class="s2">&quot;alg&quot;</span><span class="p">:</span> <span class="s2">&quot;RS256&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">jwk</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">key_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">key_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+
+    <span class="n">jwks</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;keys&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-a&quot;</span><span class="p">),</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-b&quot;</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Load the whole set in one call.</span>
+    <span class="n">jwks_set</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loaded a PyJWKSet with </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">jwks_set</span><span class="o">.</span><span class="n">keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> PyJWK(s).&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Way 1: iterate .keys</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Iterating jwks_set.keys:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">pyjwk</span> <span class="ow">in</span> <span class="n">jwks_set</span><span class="o">.</span><span class="n">keys</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  kid=</span><span class="si">{</span><span class="n">pyjwk</span><span class="o">.</span><span class="n">key_id</span><span class="si">!r:</span><span class="s2">10</span><span class="si">}</span><span class="s2"> -&gt; key object </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">pyjwk</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Way 2: index by kid (PyJWKSet supports __getitem__).</span>
+    <span class="n">chosen</span> <span class="o">=</span> <span class="n">jwks_set</span><span class="p">[</span><span class="s2">&quot;key-b&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;jwks_set[&#39;key-b&#39;] -&gt; PyJWK with kid=</span><span class="si">{</span><span class="n">chosen</span><span class="o">.</span><span class="n">key_id</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  chosen.key is a usable verification key: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">chosen</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ PyJWKSet.from_dict parses a JWKS and exposes ready-to-use PyJWK keys.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/04_pyjwkset_from_dict.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_select_key_by_kid">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Select Key By KID</b><span>05_select_key_by_kid.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05 · Selecting the right key by <code>kid</code> from a PyJWKSet.</p>
+<p>Now we combine module 10's pattern with module 11's tools. The verifier holds a
+<code>PyJWKSet</code> (its local copy of the provider's JWKS). When a token arrives:</p>
+<div class="codehl"><pre><span></span><code>1. ``get_unverified_header(token)`` -&gt; read the ``kid``.
+2. Index the set: ``jwks_set[kid]`` -&gt; the matching ``PyJWK``.
+3. ``jwt.decode(token, pyjwk.key, algorithms=[&quot;RS256&quot;])`` -&gt; verified claims.
+</code></pre></div>
+
+<p>This is the real JWKS verification flow, just with the JWKS coming from a local
+dict instead of an HTTPS fetch. The selection logic is byte-for-byte what
+<code>PyJWKClient</code> does internally (see script 07).</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/05_select_key_by_kid.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_select_key_by_kid.py</span></div><pre>Token advertises kid=&#x27;key-b&#x27;
+Selected PyJWK kid=&#x27;key-b&#x27; from the set of 2 keys
+✅ Verified claims: {&#x27;user&#x27;: &#x27;erin&#x27;}
+
+Cross-check: key-a correctly FAILS to verify a key-b token (InvalidSignatureError).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_select_key_by_kid.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05 · Selecting the right key by ``kid`` from a PyJWKSet.</span>
+
+<span class="sd">Now we combine module 10&#39;s pattern with module 11&#39;s tools. The verifier holds a</span>
+<span class="sd">``PyJWKSet`` (its local copy of the provider&#39;s JWKS). When a token arrives:</span>
+
+<span class="sd">    1. ``get_unverified_header(token)`` -&gt; read the ``kid``.</span>
+<span class="sd">    2. Index the set: ``jwks_set[kid]`` -&gt; the matching ``PyJWK``.</span>
+<span class="sd">    3. ``jwt.decode(token, pyjwk.key, algorithms=[&quot;RS256&quot;])`` -&gt; verified claims.</span>
+
+<span class="sd">This is the real JWKS verification flow, just with the JWKS coming from a local</span>
+<span class="sd">dict instead of an HTTPS fetch. The selection logic is byte-for-byte what</span>
+<span class="sd">``PyJWKClient`` does internally (see script 07).</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/05_select_key_by_kid.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">public_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">))</span>
+    <span class="n">jwk</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">,</span> <span class="s2">&quot;use&quot;</span><span class="p">:</span> <span class="s2">&quot;sig&quot;</span><span class="p">,</span> <span class="s2">&quot;alg&quot;</span><span class="p">:</span> <span class="s2">&quot;RS256&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">jwk</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Provider side: two keys, both published in the JWKS.</span>
+    <span class="n">key_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">key_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">jwks</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;keys&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-a&quot;</span><span class="p">),</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-b&quot;</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Issue a token signed by key-b, advertising kid=key-b in the header.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;erin&quot;</span><span class="p">},</span> <span class="n">key_b</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-b&quot;</span><span class="p">}</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Verifier side: load the public JWKS.</span>
+    <span class="n">jwks_set</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+
+    <span class="c1"># 1. Read kid (unverified) to choose a key.</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Token advertises kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 2. Select the matching PyJWK.</span>
+    <span class="n">signing_key</span> <span class="o">=</span> <span class="n">jwks_set</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Selected PyJWK kid=</span><span class="si">{</span><span class="n">signing_key</span><span class="o">.</span><span class="n">key_id</span><span class="si">!r}</span><span class="s2"> from the set of &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">jwks_set</span><span class="o">.</span><span class="n">keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> keys&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 3. Verify with that key.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">signing_key</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ Verified claims: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Sanity check: the *other* key must NOT validate this token.</span>
+    <span class="n">other</span> <span class="o">=</span> <span class="n">jwks_set</span><span class="p">[</span><span class="s2">&quot;key-a&quot;</span><span class="p">]</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cross-check: key-a correctly FAILS to verify a key-b token &quot;</span>
+              <span class="s2">&quot;(InvalidSignatureError).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/05_select_key_by_kid.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_key_rotation_flow">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Key Rotation Flow</b><span>06_key_rotation_flow.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06 · A key-rotation flow, simulated locally.</p>
+<p>Key rotation is <em>the</em> reason JWKS exists. You periodically retire an old signing
+key and start using a new one — but you can't flip a switch instantly, because
+tokens signed by the old key are still circulating and valid. The solution:
+<strong>publish both keys at once</strong> for an overlap window.</p>
+<p>The lifecycle this script simulates:</p>
+<div class="codehl"><pre><span></span><code>Phase 1 — only key A exists. Tokens signed by A. JWKS = {A}.
+Phase 2 — rotation begins. New key B added. JWKS = {A, B}.
+          Start signing new tokens with B (kid=B).
+          Verifier with JWKS={A,B} validates BOTH old-A and new-B tokens.
+Phase 3 — A is fully retired. JWKS = {B}.
+          Old A-signed tokens now FAIL (their kid isn&#39;t in the set).
+</code></pre></div>
+
+<p>This is precisely how providers rotate without downtime: overlap, then drop.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/06_key_rotation_flow.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_key_rotation_flow.py</span></div><pre>Phase 1 — JWKS = {A}
+  old token (kid=A): VERIFIED — {&#x27;era&#x27;: &#x27;old&#x27;}
+
+Phase 2 — JWKS = {A, B}  (overlap window)
+  old token (kid=A): VERIFIED — {&#x27;era&#x27;: &#x27;old&#x27;}
+  new token (kid=B): VERIFIED — {&#x27;era&#x27;: &#x27;new&#x27;}
+
+Phase 3 — JWKS = {B}  (A retired)
+  old token (kid=A): REJECTED — kid &#x27;A&#x27; is not in the current JWKS
+  new token (kid=B): VERIFIED — {&#x27;era&#x27;: &#x27;new&#x27;}
+
+✅ Overlap keeps old tokens valid; dropping A finally invalidates them.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_key_rotation_flow.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06 · A key-rotation flow, simulated locally.</span>
+
+<span class="sd">Key rotation is *the* reason JWKS exists. You periodically retire an old signing</span>
+<span class="sd">key and start using a new one — but you can&#39;t flip a switch instantly, because</span>
+<span class="sd">tokens signed by the old key are still circulating and valid. The solution:</span>
+<span class="sd">**publish both keys at once** for an overlap window.</span>
+
+<span class="sd">The lifecycle this script simulates:</span>
+
+<span class="sd">    Phase 1 — only key A exists. Tokens signed by A. JWKS = {A}.</span>
+<span class="sd">    Phase 2 — rotation begins. New key B added. JWKS = {A, B}.</span>
+<span class="sd">              Start signing new tokens with B (kid=B).</span>
+<span class="sd">              Verifier with JWKS={A,B} validates BOTH old-A and new-B tokens.</span>
+<span class="sd">    Phase 3 — A is fully retired. JWKS = {B}.</span>
+<span class="sd">              Old A-signed tokens now FAIL (their kid isn&#39;t in the set).</span>
+
+<span class="sd">This is precisely how providers rotate without downtime: overlap, then drop.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/06_key_rotation_flow.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">public_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">))</span>
+    <span class="n">jwk</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">,</span> <span class="s2">&quot;use&quot;</span><span class="p">:</span> <span class="s2">&quot;sig&quot;</span><span class="p">,</span> <span class="s2">&quot;alg&quot;</span><span class="p">:</span> <span class="s2">&quot;RS256&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">jwk</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_jwks</span><span class="p">(</span><span class="o">*</span><span class="n">pairs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build a JWKS from (public_key, kid) pairs.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;keys&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">public_jwk</span><span class="p">(</span><span class="n">pub</span><span class="p">,</span> <span class="n">kid</span><span class="p">)</span> <span class="k">for</span> <span class="n">pub</span><span class="p">,</span> <span class="n">kid</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">]}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">try_verify</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verify a token against a JWKS, returning a human-readable outcome.&quot;&quot;&quot;</span>
+    <span class="n">jwks_set</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">signing_key</span> <span class="o">=</span> <span class="n">jwks_set</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>  <span class="c1"># KeyError-like failure if kid not published</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;REJECTED — kid </span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2"> is not in the current JWKS&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">signing_key</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWTError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;REJECTED — </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;VERIFIED — </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">key_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">key_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+
+    <span class="c1"># A token issued early in life, signed by key A.</span>
+    <span class="n">token_old</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;era&quot;</span><span class="p">:</span> <span class="s2">&quot;old&quot;</span><span class="p">},</span> <span class="n">key_a</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;A&quot;</span><span class="p">})</span>
+
+    <span class="c1"># --- Phase 1: only A is published ---</span>
+    <span class="n">jwks_v1</span> <span class="o">=</span> <span class="n">make_jwks</span><span class="p">((</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;A&quot;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Phase 1 — JWKS = </span><span class="si">{A}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  old token (kid=A): </span><span class="si">{</span><span class="n">try_verify</span><span class="p">(</span><span class="n">token_old</span><span class="p">,</span><span class="w"> </span><span class="n">jwks_v1</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># --- Phase 2: rotation — A and B both published; new tokens signed by B ---</span>
+    <span class="n">jwks_v2</span> <span class="o">=</span> <span class="n">make_jwks</span><span class="p">((</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;A&quot;</span><span class="p">),</span> <span class="p">(</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;B&quot;</span><span class="p">))</span>
+    <span class="n">token_new</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;era&quot;</span><span class="p">:</span> <span class="s2">&quot;new&quot;</span><span class="p">},</span> <span class="n">key_b</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;B&quot;</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Phase 2 — JWKS = {A, B}  (overlap window)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  old token (kid=A): </span><span class="si">{</span><span class="n">try_verify</span><span class="p">(</span><span class="n">token_old</span><span class="p">,</span><span class="w"> </span><span class="n">jwks_v2</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  new token (kid=B): </span><span class="si">{</span><span class="n">try_verify</span><span class="p">(</span><span class="n">token_new</span><span class="p">,</span><span class="w"> </span><span class="n">jwks_v2</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># --- Phase 3: A retired; only B remains ---</span>
+    <span class="n">jwks_v3</span> <span class="o">=</span> <span class="n">make_jwks</span><span class="p">((</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;B&quot;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Phase 3 — JWKS = </span><span class="si">{B}</span><span class="s2">  (A retired)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  old token (kid=A): </span><span class="si">{</span><span class="n">try_verify</span><span class="p">(</span><span class="n">token_old</span><span class="p">,</span><span class="w"> </span><span class="n">jwks_v3</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  new token (kid=B): </span><span class="si">{</span><span class="n">try_verify</span><span class="p">(</span><span class="n">token_new</span><span class="p">,</span><span class="w"> </span><span class="n">jwks_v3</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Overlap keeps old tokens valid; dropping A finally invalidates them.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/06_key_rotation_flow.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_pyjwkclient_explained">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Pyjwkclient Explained</b><span>07_pyjwkclient_explained.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>07 · <code>PyJWKClient</code> explained (and reproduced without a network).</p>
+<p>In production you rarely build a <code>PyJWKSet</code> by hand. Instead you point
+<code>jwt.PyJWKClient</code> at a provider's <code>jwks_uri</code> and it does the heavy lifting:</p>
+<div class="codehl"><pre><span></span><code>- fetches the JWKS over HTTPS,
+- caches it (so you&#39;re not hitting the network on every request),
+- given a token, reads its ``kid`` and returns the matching signing key.
+</code></pre></div>
+
+<p>The canonical usage looks like this (NOT executed here — no network):</p>
+<div class="codehl"><pre><span></span><code># --- real-world PyJWKClient usage (reference only) -------------------
+# from jwt import PyJWKClient
+# jwks_client = PyJWKClient(&quot;https://issuer.example.com/.well-known/jwks.json&quot;)
+# signing_key = jwks_client.get_signing_key_from_jwt(token)
+# claims = jwt.decode(
+#     token,
+#     signing_key.key,
+#     algorithms=[&quot;RS256&quot;],
+#     audience=&quot;my-api&quot;,
+#     issuer=&quot;https://issuer.example.com/&quot;,
+# )
+# --------------------------------------------------------------------
+</code></pre></div>
+
+<p>Since we have no network, this script reproduces <code>get_signing_key_from_jwt</code>
+manually against a LOCAL <code>PyJWKSet</code> — proving the client is just convenience
+around the exact flow you already learned:</p>
+<div class="codehl"><pre><span></span><code>get_unverified_header -&gt; kid -&gt; lookup in PyJWKSet -&gt; signing_key.key -&gt; decode
+</code></pre></div>
+
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/11-jwks-and-key-rotation/07_pyjwkclient_explained.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_pyjwkclient_explained.py</span></div><pre>Manual stand-in for PyJWKClient.get_signing_key_from_jwt:
+  resolved signing key kid=&#x27;key-a&#x27;
+  ✅ verified claims: {&#x27;sub&#x27;: &#x27;frank&#x27;, &#x27;scope&#x27;: &#x27;read&#x27;}
+
+PyJWKClient = (fetch JWKS over HTTPS + cache) wrapped around THIS flow.
+See the commented snippet at the top of this file for real usage.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_pyjwkclient_explained.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;07 · ``PyJWKClient`` explained (and reproduced without a network).</span>
+
+<span class="sd">In production you rarely build a ``PyJWKSet`` by hand. Instead you point</span>
+<span class="sd">``jwt.PyJWKClient`` at a provider&#39;s ``jwks_uri`` and it does the heavy lifting:</span>
+
+<span class="sd">    - fetches the JWKS over HTTPS,</span>
+<span class="sd">    - caches it (so you&#39;re not hitting the network on every request),</span>
+<span class="sd">    - given a token, reads its ``kid`` and returns the matching signing key.</span>
+
+<span class="sd">The canonical usage looks like this (NOT executed here — no network):</span>
+
+<span class="sd">    # --- real-world PyJWKClient usage (reference only) -------------------</span>
+<span class="sd">    # from jwt import PyJWKClient</span>
+<span class="sd">    # jwks_client = PyJWKClient(&quot;https://issuer.example.com/.well-known/jwks.json&quot;)</span>
+<span class="sd">    # signing_key = jwks_client.get_signing_key_from_jwt(token)</span>
+<span class="sd">    # claims = jwt.decode(</span>
+<span class="sd">    #     token,</span>
+<span class="sd">    #     signing_key.key,</span>
+<span class="sd">    #     algorithms=[&quot;RS256&quot;],</span>
+<span class="sd">    #     audience=&quot;my-api&quot;,</span>
+<span class="sd">    #     issuer=&quot;https://issuer.example.com/&quot;,</span>
+<span class="sd">    # )</span>
+<span class="sd">    # --------------------------------------------------------------------</span>
+
+<span class="sd">Since we have no network, this script reproduces ``get_signing_key_from_jwt``</span>
+<span class="sd">manually against a LOCAL ``PyJWKSet`` — proving the client is just convenience</span>
+<span class="sd">around the exact flow you already learned:</span>
+
+<span class="sd">    get_unverified_header -&gt; kid -&gt; lookup in PyJWKSet -&gt; signing_key.key -&gt; decode</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/11-jwks-and-key-rotation/07_pyjwkclient_explained.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">public_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">))</span>
+    <span class="n">jwk</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">,</span> <span class="s2">&quot;use&quot;</span><span class="p">:</span> <span class="s2">&quot;sig&quot;</span><span class="p">,</span> <span class="s2">&quot;alg&quot;</span><span class="p">:</span> <span class="s2">&quot;RS256&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">jwk</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_signing_key_from_jwt_local</span><span class="p">(</span><span class="n">jwks_set</span><span class="p">:</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWK</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A from-scratch reimplementation of PyJWKClient.get_signing_key_from_jwt.</span>
+
+<span class="sd">    The real method does the same three steps — only its key source is an</span>
+<span class="sd">    HTTPS-fetched, cached JWKS instead of our in-memory PyJWKSet.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>   <span class="c1"># 1. read kid (unverified)</span>
+    <span class="k">return</span> <span class="n">jwks_set</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>                            <span class="c1"># 2. look it up in the set</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Provider publishes a JWKS with two keys.</span>
+    <span class="n">key_a</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">key_b</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">jwks</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;keys&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_a</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-a&quot;</span><span class="p">),</span>
+            <span class="n">public_jwk</span><span class="p">(</span><span class="n">key_b</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="s2">&quot;key-b&quot;</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+    <span class="n">jwks_set</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+
+    <span class="c1"># A token signed by key-a.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;frank&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="s2">&quot;read&quot;</span><span class="p">},</span>
+        <span class="n">key_a</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-a&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Manual stand-in for PyJWKClient.get_signing_key_from_jwt:&quot;</span><span class="p">)</span>
+    <span class="n">signing_key</span> <span class="o">=</span> <span class="n">get_signing_key_from_jwt_local</span><span class="p">(</span><span class="n">jwks_set</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  resolved signing key kid=</span><span class="si">{</span><span class="n">signing_key</span><span class="o">.</span><span class="n">key_id</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 3. Final verified decode — identical to the real-world snippet above.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">signing_key</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ✅ verified claims: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PyJWKClient = (fetch JWKS over HTTPS + cache) wrapped around THIS flow.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;See the commented snippet at the top of this file for real usage.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/11-jwks-and-key-rotation/07_pyjwkclient_explained.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="10-headers-and-kid.html"><div class="dir">← Previous</div><div class="ttl">10 · Module 10 · Headers &amp; kid</div></a><a class="next" href="12-validation-errors-and-leeway.html"><div class="dir">Next →</div><div class="ttl">12 · Module 12 · Validation, Errors &amp; Leeway</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

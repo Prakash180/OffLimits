@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 16 · Build Your Own Local Identity Provider · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html" class="active"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>16 · Module 16 · Build Your Own Local Identity Provider</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#a3e635,#65a30d)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#a3e635;border-color:#a3e63555;background:#a3e63511">Module 16</span>
+  <h1 style="margin-top:18px">Module 16 · Build Your Own Local Identity Provider</h1>
+</section>
+<section class="mental reveal"><h1 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h1>
+<h2 id="how-an-identity-provider-issues-and-verifies-trust">How an identity provider issues and verifies trust</h2>
+<p>Picture a <strong>passport office</strong> (the identity provider) and a <strong>border agent</strong>
+(your API). You don't expect the border agent to phone the passport office and
+re-check your fingerprints every time you cross. Instead, the passport office
+<strong>signs</strong> your passport with a tamper-evident seal, and publishes a catalogue of
+its official seals. Any border agent who trusts that catalogue can verify your
+passport on the spot — offline, in milliseconds.</p>
+<p>A JWT-issuing IdP works exactly like that.</p>
+<h3 id="issuing-the-passport-office">Issuing (the passport office)</h3>
+<p>When a user logs in, the IdP gathers the facts it's willing to vouch for —
+<em>who</em> the user is (<code>sub</code>, <code>email</code>, <code>name</code>), <em>what</em> they may do (<code>scope</code>,
+<code>roles</code>), and <em>for how long</em> (<code>exp</code>) — and packs them into a JSON payload. It
+then signs that payload with the <strong>private half</strong> of an RSA keypair using
+<strong>RS256</strong>. The signature is a number that only the holder of the private key
+could have produced, yet <em>anyone</em> with the public key can check. Crucially, the
+IdP stamps the token's header with a <strong><code>kid</code></strong> — the id of the exact key it
+signed with — so the verifier knows which seal to look up.</p>
+<p>The private key never leaves the IdP. What the IdP <em>does</em> share, freely and
+publicly, is the matching <strong>public key</strong>, served as a <strong>JWKS</strong> (JSON Web Key
+Set) at a stable URL.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    U[User logs in] --&gt; S[IdP builds claims&lt;br/&gt;iss·aud·sub·exp·scope]
+    S --&gt; K[Sign RS256 with PRIVATE key&lt;br/&gt;add kid to header]
+    K --&gt; T[Token handed to client]
+    T --&gt; R[Resource server]
+    R --&gt; J[Fetch JWKS by kid&lt;br/&gt;PUBLIC key only]
+    J --&gt; V[Verify signature·iss·aud·exp]
+    V --&gt; Y[Trust the claims]</div></div>
+<h3 id="verifying-the-border-agent">Verifying (the border agent)</h3>
+<p>The resource server receives <code>Authorization: Bearer &lt;token&gt;</code>. It reads the
+<strong>unverified</strong> header just to learn the <code>kid</code>, fetches the IdP's JWKS, and picks
+the public key whose <code>kid</code> matches. Then it runs <code>jwt.decode(...)</code>, which
+re-computes the signature and rejects anything tampered, expired, issued by the
+wrong party (<code>iss</code>), or meant for someone else (<code>aud</code>). No shared password, no
+callback to the IdP — just public-key math.</p>
+<h3 id="why-the-catalogue-has-more-than-one-seal">Why the catalogue has more than one seal</h3>
+<p>Passport offices retire old seals and mint new ones. If they swapped instantly,
+every passport signed yesterday would suddenly look forged. So they keep the
+<strong>old and new seal in the public catalogue at once</strong> and route by seal id. That
+is precisely why a JWKS publishes a <em>set</em> of keys and tokens carry a <code>kid</code>:
+rotation becomes invisible to everyone holding a still-valid token, while
+retired keys quietly age out and their tokens stop validating.</p>
+<p>That single idea — <strong>sign privately, verify publicly, route by <code>kid</code></strong> — is the
+entire trust backbone behind Microsoft Entra ID, Google, Auth0, and the local
+provider you just built.</p></section>
+<section class="prose reveal"><h1 id="module-16-build-your-own-local-identity-provider">🏛️ Module 16 · Build Your Own Local Identity Provider</h1>
+<blockquote>
+<p><em>"You've spent 15 modules verifying other people's tokens. Now you become the
+one who issues them."</em></p>
+</blockquote>
+<p>This module ships a <strong>fully local, offline OAuth2 + OpenID Connect (OIDC)
+identity provider</strong> built on FastAPI + PyJWT + cryptography. It mirrors the exact
+shape of Microsoft Entra ID / Google / Auth0 — discovery document, JWKS,
+authorize, token, userinfo — so you can run the <strong>complete authorization-code
+flow</strong>, validate tokens against a <strong>JWKS</strong>, exchange <strong>refresh tokens</strong>, and
+watch <strong>key rotation</strong> happen live, all without a single network call and
+without an Azure subscription.</p>
+<p>Every numbered script drives the provider <strong>in-process</strong> with
+<code>fastapi.testclient.TestClient</code>, so it runs to completion and exits <code>0</code>. A real
+<code>uvicorn</code> entrypoint is provided for interactive use.</p>
+<hr />
+<h2 id="oauth2-authorization-code-oidc-in-one-paragraph">🧭 OAuth2 authorization-code + OIDC, in one paragraph</h2>
+<p>In the <strong>authorization-code flow</strong>, your app never sees the user's password. It
+sends the browser to the IdP's <code>/authorize</code> endpoint; the user authenticates;
+the IdP hands back a single-use <strong>code</strong> at your redirect URI. Your backend then
+POSTs that code (plus its <code>client_secret</code>) to <code>/token</code> and receives an
+<strong>access_token</strong> (a key to an API), an <strong>id_token</strong> (OIDC proof of <em>who</em> logged
+in), and a <strong>refresh_token</strong> (to get fresh access tokens later). The API
+validates the access token by fetching the IdP's public keys from its <strong>JWKS</strong>
+and checking the RS256 signature, <code>iss</code>, <code>aud</code>, and <code>exp</code>. OIDC is the thin
+identity layer on top of OAuth2 that adds the <code>id_token</code> and the discovery/JWKS
+conventions.</p>
+<hr />
+<h2 id="architecture">🏗️ Architecture</h2>
+<div class="codehl"><pre><span></span><code>        ┌──────────────────────────── idp package ────────────────────────────┐
+        │  keys.py   RSA-2048 signing keys (current + next), JWKS, rotation    │
+        │  server.py FastAPI `app`: discovery · jwks · authorize · token · …   │
+        │  client.py in-process TestClient driver for the demos                │
+        └──────────────────────────────────────────────────────────────────────┘
+                 ▲                              ▲                        ▲
+   01/02 discovery+jwks          03 auth-code · 06 refresh      04/05/07/08 validate
+</code></pre></div>
+
+<ul>
+<li><strong>Signing</strong>: every token is <strong>RS256</strong> with the signing key's <code>kid</code> in the JWT
+  header. The provider holds two keys at once (<code>current</code> + <code>next</code>) and publishes
+  both, so validation survives a rotation window.</li>
+<li><strong>Access token</strong> → audience = the resource API (<code>api://local-resource</code>),
+  carries <code>iss/aud/sub/exp/iat/scope/roles/jti</code>.</li>
+<li><strong>id_token</strong> → audience = the <code>client_id</code>, carries <code>nonce/email/name</code>.</li>
+<li><strong>Stores</strong> are in-memory: a user (<code>alice</code>) and a confidential client
+  (<code>local-web-app</code>).</li>
+</ul>
+<hr />
+<h2 id="the-full-flow-sequence-diagram">🔄 The full flow (sequence diagram)</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">sequenceDiagram
+    participant B as Browser / Client
+    participant IdP as Local IdP (FastAPI app)
+    participant API as Resource (/userinfo)
+
+    B-&gt;&gt;IdP: GET /authorize?client_id&amp;redirect_uri&amp;scope&amp;nonce
+    Note over IdP: validate client + redirect_uri + scope,&lt;br/&gt;auto-login alice, mint single-use code
+    IdP--&gt;&gt;B: 302 redirect_uri?code=...&amp;state=...
+    B-&gt;&gt;IdP: POST /token (code + client_id + client_secret)
+    Note over IdP: validate client_secret, consume code
+    IdP--&gt;&gt;B: access_token + id_token + refresh_token
+    B-&gt;&gt;API: GET /userinfo  Authorization: Bearer access_token
+    API-&gt;&gt;IdP: (kid) pick key from GET /jwks.json
+    IdP--&gt;&gt;API: JWKS (public keys, by kid)
+    API-&gt;&gt;API: RS256 verify + iss + aud + exp
+    API--&gt;&gt;B: 200 { sub, email, name, roles, scope }
+    Note over B,IdP: later: POST /token grant_type=refresh_token&lt;br/&gt;→ fresh access_token</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<p>Run each from the repo root (<code>/home/astro/catalyst/jwt-test</code>):</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td>Discovery document</td>
+<td>The <code>.well-known/openid-configuration</code> manifest, field by field</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/01_discovery_document.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td>JWKS endpoint</td>
+<td>Public keys, <code>kid</code> routing, why two keys are published</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/02_jwks_endpoint.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td>Authorization-code flow</td>
+<td><code>/authorize</code> → code → <code>/token</code> → tokens, decoded</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/03_authorization_code_flow.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td>Validate with JWKS</td>
+<td>Verify the access token exactly like <code>tests/validate.py</code>, plus a tampered-token failure</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/04_validate_with_jwks.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td>userinfo endpoint</td>
+<td>The protected resource; 200 vs 401</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/05_userinfo_endpoint.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td>Refresh-token flow</td>
+<td>Swap a refresh token for a fresh access token</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/06_refresh_token_flow.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td>id_token &amp; nonce</td>
+<td>OIDC id_token validation + the nonce round-trip</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/07_id_token_and_nonce.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td>Live key rotation</td>
+<td>Rotate <code>current</code>→<code>next</code>, prove published keys validate and a retired key fails</td>
+<td><code>uv run python pyjwt-course/16-local-identity-provider/08_key_rotation_live.py</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The numbered scripts <strong>never</strong> start a blocking server — they drive the FastAPI
+<code>app</code> in-process. <code>idp/server.py</code> is for <strong>live</strong> use and is <strong>not</strong>
+auto-executed by any script.</p>
+</blockquote>
+<hr />
+<h2 id="running-the-live-server-optional-interactive">🖥️ Running the live server (optional, interactive)</h2>
+<p>To poke the provider with <code>curl</code>/Postman/a browser, run it under uvicorn. Because
+the folder name contains hyphens, point uvicorn at it with <code>--app-dir</code>:</p>
+<div class="codehl"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>idp.server:app<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--app-dir<span class="w"> </span>pyjwt-course/16-local-identity-provider<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--port<span class="w"> </span><span class="m">9000</span>
+</code></pre></div>
+
+<p>Then try:</p>
+<div class="codehl"><pre><span></span><code>curl<span class="w"> </span>http://localhost:9000/.well-known/openid-configuration
+curl<span class="w"> </span>http://localhost:9000/jwks.json
+</code></pre></div>
+
+<p>The <code>issuer</code> is fixed at <code>http://localhost:9000</code>, so run it on port <strong>9000</strong> for
+the tokens' <code>iss</code> to match the live URL.</p>
+<hr />
+<h2 id="local-endpoint-azure-entra-id-equivalent">🔁 Local endpoint ↔ Azure Entra ID equivalent</h2>
+<table>
+<thead>
+<tr>
+<th>Local IdP (module 16)</th>
+<th>Microsoft Entra ID equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET http://localhost:9000/.well-known/openid-configuration</code></td>
+<td><code>https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration</code></td>
+</tr>
+<tr>
+<td><code>GET http://localhost:9000/jwks.json</code></td>
+<td><code>https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys</code></td>
+</tr>
+<tr>
+<td><code>GET http://localhost:9000/authorize</code></td>
+<td><code>https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize</code></td>
+</tr>
+<tr>
+<td><code>POST http://localhost:9000/token</code></td>
+<td><code>https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token</code></td>
+</tr>
+<tr>
+<td><code>GET http://localhost:9000/userinfo</code></td>
+<td><code>https://graph.microsoft.com/oidc/userinfo</code></td>
+</tr>
+<tr>
+<td><code>issuer</code> = <code>http://localhost:9000</code></td>
+<td><code>iss</code> = <code>https://login.microsoftonline.com/{tenant}/v2.0</code></td>
+</tr>
+<tr>
+<td><code>client_id</code> = <code>local-web-app</code></td>
+<td>your app registration's <strong>Application (client) ID</strong></td>
+</tr>
+<tr>
+<td><code>client_secret</code> = <code>local-web-app-secret</code></td>
+<td>a <strong>client secret</strong> from the app registration</td>
+</tr>
+<tr>
+<td>access-token <code>aud</code> = <code>api://local-resource</code></td>
+<td>the API's <strong>Application ID URI</strong></td>
+</tr>
+<tr>
+<td>signing key <code>kid</code> (<code>local-key-XXXX</code>)</td>
+<td>Microsoft's rotating signing-key <code>kid</code></td>
+</tr>
+</tbody>
+</table>
+<p>The validation code is identical in shape to this repo's <code>tests/validate.py</code> and
+module 15's <code>07_entra_id_validation_pattern.py</code> — only the JWKS URL changes.</p>
+<hr />
+<h2 id="key-takeaways">🎯 Key takeaways</h2>
+<ul>
+<li>An <strong>IdP signs with a private key and publishes the public key as a JWKS</strong>;
+  resource servers verify with that public key — they never hold a secret.</li>
+<li>The <strong><code>kid</code> header</strong> is the routing glue: it tells the verifier which JWKS key
+  to use, which is what makes <strong>zero-downtime key rotation</strong> possible.</li>
+<li><strong>access_token (<code>aud</code> = API)</strong> and <strong>id_token (<code>aud</code> = client_id)</strong> answer two
+  different questions: <em>what may I call?</em> vs <em>who is this user?</em></li>
+<li>The <strong>nonce</strong> binds an id_token to the exact login request that asked for it.</li>
+<li><strong>Refresh tokens</strong> trade a long-lived credential for short-lived access tokens
+  so a leaked access token expires fast.</li>
+<li>Swapping <code>localhost:9000</code> for a real provider's discovery URL is the <em>only</em>
+  change needed to point this code at Azure/Google.</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_discovery_document" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Discovery Document</b><span>01_discovery_document.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Every OpenID Connect provider publishes a JSON document at a well-known URL:</p>
+<div class="codehl"><pre><span></span><code>GET {issuer}/.well-known/openid-configuration
+</code></pre></div>
+
+<p>It tells clients <em>everything</em> they need to talk to the provider — without
+hard-coding a single URL. Real examples:</p>
+<div class="codehl"><pre><span></span><code>Azure Entra ID : https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration
+Google         : https://accounts.google.com/.well-known/openid-configuration
+</code></pre></div>
+
+<p>Our LOCAL IdP serves the same document. This script fetches it (in-process,
+no network) and explains the most important fields.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/01_discovery_document.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_discovery_document.py</span></div><pre>========================================================================
+OIDC DISCOVERY DOCUMENT  (GET /.well-known/openid-configuration)
+========================================================================
+{
+  &quot;issuer&quot;: &quot;http://localhost:9000&quot;,
+  &quot;authorization_endpoint&quot;: &quot;http://localhost:9000/authorize&quot;,
+  &quot;token_endpoint&quot;: &quot;http://localhost:9000/token&quot;,
+  &quot;userinfo_endpoint&quot;: &quot;http://localhost:9000/userinfo&quot;,
+  &quot;jwks_uri&quot;: &quot;http://localhost:9000/jwks.json&quot;,
+  &quot;response_types_supported&quot;: [
+    &quot;code&quot;
+  ],
+  &quot;grant_types_supported&quot;: [
+    &quot;authorization_code&quot;,
+    &quot;refresh_token&quot;
+  ],
+  &quot;subject_types_supported&quot;: [
+    &quot;public&quot;
+  ],
+  &quot;id_token_signing_alg_values_supported&quot;: [
+    &quot;RS256&quot;
+  ],
+  &quot;token_endpoint_auth_methods_supported&quot;: [
+    &quot;client_secret_post&quot;
+  ],
+  &quot;scopes_supported&quot;: [
+    &quot;openid&quot;,
+    &quot;profile&quot;,
+    &quot;email&quot;,
+    &quot;api.read&quot;,
+    &quot;api.write&quot;
+  ],
+  &quot;claims_supported&quot;: [
+    &quot;iss&quot;,
+    &quot;aud&quot;,
+    &quot;sub&quot;,
+    &quot;exp&quot;,
+    &quot;iat&quot;,
+    &quot;nbf&quot;,
+    &quot;email&quot;,
+    &quot;name&quot;,
+    &quot;roles&quot;,
+    &quot;scope&quot;,
+    &quot;nonce&quot;
+  ]
+}
+
+========================================================================
+WHAT EACH KEY FIELD MEANS
+========================================================================
+
+• issuer
+    value: http://localhost:9000
+    note : The provider&#x27;s identity. Baked into every token&#x27;s `iss` claim; clients pin it.
+
+• authorization_endpoint
+    value: http://localhost:9000/authorize
+    note : Where the browser is sent to log in and get an auth `code`.
+
+• token_endpoint
+    value: http://localhost:9000/token
+    note : Where the client swaps the code (or a refresh_token) for tokens.
+
+• userinfo_endpoint
+    value: http://localhost:9000/userinfo
+    note : Protected endpoint returning user claims for a valid access token.
+
+• jwks_uri
+    value: http://localhost:9000/jwks.json
+    note : Where the provider publishes its PUBLIC signing keys (the JWKS).
+
+• id_token_signing_alg_values_supported
+    value: [&#x27;RS256&#x27;]
+    note : Which algorithms id_tokens are signed with (RS256).
+
+• grant_types_supported
+    value: [&#x27;authorization_code&#x27;, &#x27;refresh_token&#x27;]
+    note : OAuth2 grants we accept (authorization_code, refresh_token).
+
+• scopes_supported
+    value: [&#x27;openid&#x27;, &#x27;profile&#x27;, &#x27;email&#x27;, &#x27;api.read&#x27;, &#x27;api.write&#x27;]
+    note : Scopes a client may request (openid, profile, email, api.*).
+
+========================================================================
+HOW THIS MAPS TO REAL PROVIDERS
+========================================================================
+A client library reads THIS document and auto-discovers the token,
+authorize, userinfo and jwks URLs. Point it at Azure/Google instead
+of http://localhost:9000 and the exact same code keeps working.
+
+OK ✔  discovery document is well-formed.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_discovery_document.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">01 · The OIDC discovery document — the provider&#39;s machine-readable manifest</span>
+<span class="sd">===========================================================================</span>
+
+<span class="sd">Every OpenID Connect provider publishes a JSON document at a well-known URL:</span>
+
+<span class="sd">    GET {issuer}/.well-known/openid-configuration</span>
+
+<span class="sd">It tells clients *everything* they need to talk to the provider — without</span>
+<span class="sd">hard-coding a single URL. Real examples:</span>
+
+<span class="sd">    Azure Entra ID : https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration</span>
+<span class="sd">    Google         : https://accounts.google.com/.well-known/openid-configuration</span>
+
+<span class="sd">Our LOCAL IdP serves the same document. This script fetches it (in-process,</span>
+<span class="sd">no network) and explains the most important fields.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/01_discovery_document.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+
+<span class="n">FIELD_NOTES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;issuer&quot;</span><span class="p">:</span> <span class="s2">&quot;The provider&#39;s identity. Baked into every token&#39;s `iss` claim; clients pin it.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;authorization_endpoint&quot;</span><span class="p">:</span> <span class="s2">&quot;Where the browser is sent to log in and get an auth `code`.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;token_endpoint&quot;</span><span class="p">:</span> <span class="s2">&quot;Where the client swaps the code (or a refresh_token) for tokens.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;userinfo_endpoint&quot;</span><span class="p">:</span> <span class="s2">&quot;Protected endpoint returning user claims for a valid access token.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;jwks_uri&quot;</span><span class="p">:</span> <span class="s2">&quot;Where the provider publishes its PUBLIC signing keys (the JWKS).&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;id_token_signing_alg_values_supported&quot;</span><span class="p">:</span> <span class="s2">&quot;Which algorithms id_tokens are signed with (RS256).&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;grant_types_supported&quot;</span><span class="p">:</span> <span class="s2">&quot;OAuth2 grants we accept (authorization_code, refresh_token).&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;scopes_supported&quot;</span><span class="p">:</span> <span class="s2">&quot;Scopes a client may request (openid, profile, email, api.*).&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+    <span class="n">doc</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">discovery</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;OIDC DISCOVERY DOCUMENT  (GET /.well-known/openid-configuration)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHAT EACH KEY FIELD MEANS&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">field</span><span class="p">,</span> <span class="n">note</span> <span class="ow">in</span> <span class="n">FIELD_NOTES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">field</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">• </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    value: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    note : </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HOW THIS MAPS TO REAL PROVIDERS&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;A client library reads THIS document and auto-discovers the token,&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;authorize, userinfo and jwks URLs. Point it at Azure/Google instead&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;of http://localhost:9000 and the exact same code keeps working.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Sanity checks so the lesson fails loudly if the contract drifts.</span>
+    <span class="k">assert</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;issuer&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;http://localhost:9000&quot;</span>
+    <span class="k">assert</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;jwks_uri&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;/jwks.json&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="s2">&quot;RS256&quot;</span> <span class="ow">in</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;id_token_signing_alg_values_supported&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  discovery document is well-formed.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/01_discovery_document.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_jwks_endpoint">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>JWKS Endpoint</b><span>02_jwks_endpoint.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A provider signs tokens with a PRIVATE key and publishes the matching PUBLIC
+key as a JWK (JSON Web Key) in a JWKS (JSON Web Key Set) at <code>jwks_uri</code>.</p>
+<p>Each JWK carries:</p>
+<ul>
+<li><code>kty</code> — key type (<code>RSA</code> here).</li>
+<li><code>n</code> / <code>e</code> — the RSA public modulus and exponent (the actual key material).</li>
+<li><code>kid</code> — key id; the JWT header's <code>kid</code> points at exactly one of these.</li>
+<li><code>use</code> / <code>alg</code> — intended use (<code>sig</code>) and algorithm (<code>RS256</code>).</li>
+</ul>
+<p>Our IdP publishes TWO keys at once (<code>current</code> + <code>next</code>) so that validation
+keeps working across a key rotation (see script 08).</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/02_jwks_endpoint.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_jwks_endpoint.py</span></div><pre>========================================================================
+JWKS  (GET /jwks.json)  — public verification keys only
+========================================================================
+
+Key #1:
+{
+  &quot;kty&quot;: &quot;RSA&quot;,
+  &quot;key_ops&quot;: [
+    &quot;verify&quot;
+  ],
+  &quot;n&quot;: &quot;xp5v05jCjSxdA2OZis4oqEkOlZeZvEGq...(truncated)&quot;,
+  &quot;e&quot;: &quot;AQAB&quot;,
+  &quot;kid&quot;: &quot;local-key-0001&quot;,
+  &quot;use&quot;: &quot;sig&quot;,
+  &quot;alg&quot;: &quot;RS256&quot;
+}
+
+Key #2:
+{
+  &quot;kty&quot;: &quot;RSA&quot;,
+  &quot;key_ops&quot;: [
+    &quot;verify&quot;
+  ],
+  &quot;n&quot;: &quot;qjNZqyR8RG20-KpTj6aNSiJdC_Hn_W1C...(truncated)&quot;,
+  &quot;e&quot;: &quot;AQAB&quot;,
+  &quot;kid&quot;: &quot;local-key-0002&quot;,
+  &quot;use&quot;: &quot;sig&quot;,
+  &quot;alg&quot;: &quot;RS256&quot;
+}
+
+========================================================================
+FIELD-BY-FIELD
+========================================================================
+• kty=RSA   the key is an RSA key
+• n, e      the public modulus + exponent (the verifiable key material)
+• kid       the id a token&#x27;s header names so clients pick THIS key
+• use=sig   this key is for signature verification
+• alg=RS256 RSASSA-PKCS1-v1_5 using SHA-256
+
+Published kids: [&#x27;local-key-0001&#x27;, &#x27;local-key-0002&#x27;]
+Two keys are advertised so a freshly-rotated key is already trusted
+by clients that cached the JWKS a moment ago.
+
+OK ✔  JWKS contains two well-formed RSA signing keys.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_jwks_endpoint.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">02 · The JWKS endpoint — how clients learn the provider&#39;s public keys</span>
+<span class="sd">=====================================================================</span>
+
+<span class="sd">A provider signs tokens with a PRIVATE key and publishes the matching PUBLIC</span>
+<span class="sd">key as a JWK (JSON Web Key) in a JWKS (JSON Web Key Set) at ``jwks_uri``.</span>
+
+<span class="sd">Each JWK carries:</span>
+
+<span class="sd">* ``kty`` — key type (``RSA`` here).</span>
+<span class="sd">* ``n`` / ``e`` — the RSA public modulus and exponent (the actual key material).</span>
+<span class="sd">* ``kid`` — key id; the JWT header&#39;s ``kid`` points at exactly one of these.</span>
+<span class="sd">* ``use`` / ``alg`` — intended use (``sig``) and algorithm (``RS256``).</span>
+
+<span class="sd">Our IdP publishes TWO keys at once (``current`` + ``next``) so that validation</span>
+<span class="sd">keeps working across a key rotation (see script 08).</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/02_jwks_endpoint.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+    <span class="n">jwks</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">jwks</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;JWKS  (GET /jwks.json)  — public verification keys only&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">jwk</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">jwks</span><span class="p">[</span><span class="s2">&quot;keys&quot;</span><span class="p">],</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="n">preview</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">jwk</span><span class="p">)</span>
+        <span class="c1"># The modulus `n` is huge; truncate it for readable output.</span>
+        <span class="n">preview</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">preview</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">][:</span><span class="mi">32</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;...(truncated)&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Key #</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">preview</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FIELD-BY-FIELD&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• kty=RSA   the key is an RSA key&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• n, e      the public modulus + exponent (the verifiable key material)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• kid       the id a token&#39;s header names so clients pick THIS key&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• use=sig   this key is for signature verification&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• alg=RS256 RSASSA-PKCS1-v1_5 using SHA-256&quot;</span><span class="p">)</span>
+
+    <span class="n">kids</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span><span class="p">[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">jwks</span><span class="p">[</span><span class="s2">&quot;keys&quot;</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Published kids: </span><span class="si">{</span><span class="n">kids</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Two keys are advertised so a freshly-rotated key is already trusted&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;by clients that cached the JWKS a moment ago.&quot;</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">jwks</span><span class="p">[</span><span class="s2">&quot;keys&quot;</span><span class="p">])</span> <span class="o">==</span> <span class="mi">2</span>
+    <span class="k">assert</span> <span class="nb">all</span><span class="p">(</span><span class="n">k</span><span class="p">[</span><span class="s2">&quot;kty&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;RSA&quot;</span> <span class="ow">and</span> <span class="n">k</span><span class="p">[</span><span class="s2">&quot;use&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;sig&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">jwks</span><span class="p">[</span><span class="s2">&quot;keys&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  JWKS contains two well-formed RSA signing keys.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/02_jwks_endpoint.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_authorization_code_flow">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Authorization Code Flow</b><span>03_authorization_code_flow.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>This is the heart of OAuth2 + OIDC. The confidential auth-code flow:</p>
+<div class="codehl"><pre><span></span><code>1. Client redirects the browser to  GET /authorize?...   (user logs in)
+2. Provider redirects back with      ?code=...           (a one-time code)
+3. Client POSTs the code to          POST /token         (+ client_secret)
+4. Provider returns                  access_token, id_token, refresh_token
+</code></pre></div>
+
+<p>We run all four steps against the LOCAL IdP in-process and decode the tokens so
+you can see exactly what comes out. (Token VALIDATION via JWKS is script 04.)</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/03_authorization_code_flow.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_authorization_code_flow.py</span></div><pre>========================================================================
+STEP 1+2 · GET /authorize  -&gt;  one-time authorization code
+========================================================================
+Received authorization code: RjMvEW5OggdU0Xii... (single-use, short-lived)
+
+========================================================================
+STEP 3+4 · POST /token  -&gt;  exchange code for tokens
+========================================================================
+Token response fields:
+  access_token: eyJhbGciOiJSUzI1NiIsImtp...
+  token_type: Bearer
+  expires_in: 900
+  refresh_token: oNe28M9PF5dyuG-9709bv59q...
+  scope: openid profile email api.read
+  id_token: eyJhbGciOiJSUzI1NiIsImtp...
+
+ACCESS TOKEN (for the resource API — note aud + scope)
+  header : {&quot;alg&quot;: &quot;RS256&quot;, &quot;kid&quot;: &quot;local-key-0001&quot;, &quot;typ&quot;: &quot;JWT&quot;}
+  payload: {
+  &quot;iss&quot;: &quot;http://localhost:9000&quot;,
+  &quot;aud&quot;: &quot;api://local-resource&quot;,
+  &quot;sub&quot;: &quot;user-alice-0001&quot;,
+  &quot;scope&quot;: &quot;openid profile email api.read&quot;,
+  &quot;roles&quot;: [
+    &quot;reader&quot;,
+    &quot;writer&quot;
+  ],
+  &quot;jti&quot;: &quot;pSx54_5dEyBX2x7H&quot;,
+  &quot;iat&quot;: 1782849932,
+  &quot;nbf&quot;: 1782849932,
+  &quot;exp&quot;: 1782850832
+}
+
+ID TOKEN (OIDC identity for the client — note nonce/email/name)
+  header : {&quot;alg&quot;: &quot;RS256&quot;, &quot;kid&quot;: &quot;local-key-0001&quot;, &quot;typ&quot;: &quot;JWT&quot;}
+  payload: {
+  &quot;iss&quot;: &quot;http://localhost:9000&quot;,
+  &quot;aud&quot;: &quot;local-web-app&quot;,
+  &quot;sub&quot;: &quot;user-alice-0001&quot;,
+  &quot;email&quot;: &quot;alice@local.test&quot;,
+  &quot;name&quot;: &quot;Alice Liddell&quot;,
+  &quot;iat&quot;: 1782849932,
+  &quot;exp&quot;: 1782850832,
+  &quot;nonce&quot;: &quot;n-onceabc123&quot;
+}
+
+========================================================================
+WHAT JUST HAPPENED
+========================================================================
+• The code was exchanged exactly once; replaying it would 400.
+• access_token.aud = the API; id_token.aud = the client_id.
+• Both are RS256-signed with a `kid` pointing at the JWKS (script 04).
+
+OK ✔  full authorization-code flow completed locally.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_authorization_code_flow.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">03 · The authorization-code flow, end to end (locally)</span>
+<span class="sd">======================================================</span>
+
+<span class="sd">This is the heart of OAuth2 + OIDC. The confidential auth-code flow:</span>
+
+<span class="sd">    1. Client redirects the browser to  GET /authorize?...   (user logs in)</span>
+<span class="sd">    2. Provider redirects back with      ?code=...           (a one-time code)</span>
+<span class="sd">    3. Client POSTs the code to          POST /token         (+ client_secret)</span>
+<span class="sd">    4. Provider returns                  access_token, id_token, refresh_token</span>
+
+<span class="sd">We run all four steps against the LOCAL IdP in-process and decode the tokens so</span>
+<span class="sd">you can see exactly what comes out. (Token VALIDATION via JWKS is script 04.)</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/03_authorization_code_flow.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">show</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pretty-print a JWT&#39;s header + payload WITHOUT verifying (inspection).&quot;&quot;&quot;</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  header : </span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">header</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  payload: </span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1+2 · GET /authorize  -&gt;  one-time authorization code&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">authorize</span><span class="p">(</span>
+        <span class="n">scope</span><span class="o">=</span><span class="s2">&quot;openid profile email api.read&quot;</span><span class="p">,</span>
+        <span class="n">nonce</span><span class="o">=</span><span class="s2">&quot;n-onceabc123&quot;</span><span class="p">,</span>
+        <span class="n">state</span><span class="o">=</span><span class="s2">&quot;opaque-state-xyz&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Received authorization code: </span><span class="si">{</span><span class="n">code</span><span class="p">[:</span><span class="mi">16</span><span class="p">]</span><span class="si">}</span><span class="s2">... (single-use, short-lived)&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3+4 · POST /token  -&gt;  exchange code for tokens&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">exchange</span><span class="p">(</span><span class="n">code</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token response fields:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tokens</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">shown</span> <span class="o">=</span> <span class="n">v</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;token_type&quot;</span><span class="p">,</span> <span class="s2">&quot;expires_in&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">}</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)[:</span><span class="mi">24</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">shown</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">show</span><span class="p">(</span><span class="s2">&quot;ACCESS TOKEN (for the resource API — note aud + scope)&quot;</span><span class="p">,</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">])</span>
+    <span class="n">show</span><span class="p">(</span><span class="s2">&quot;ID TOKEN (OIDC identity for the client — note nonce/email/name)&quot;</span><span class="p">,</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;id_token&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHAT JUST HAPPENED&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• The code was exchanged exactly once; replaying it would 400.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• access_token.aud = the API; id_token.aud = the client_id.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;• Both are RS256-signed with a `kid` pointing at the JWKS (script 04).&quot;</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="p">{</span><span class="s2">&quot;access_token&quot;</span><span class="p">,</span> <span class="s2">&quot;id_token&quot;</span><span class="p">,</span> <span class="s2">&quot;refresh_token&quot;</span><span class="p">}</span> <span class="o">&lt;=</span> <span class="n">tokens</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;token_type&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Bearer&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  full authorization-code flow completed locally.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/03_authorization_code_flow.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_validate_with_jwks">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Validate With JWKS</b><span>04_validate_with_jwks.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>This script validates a token EXACTLY the way this repo's <code>tests/validate.py</code>
+validates an Azure Entra ID token — only the JWKS source is our local IdP
+instead of <code>login.microsoftonline.com</code>.</p>
+<p>The canonical steps (identical in shape to <code>tests/validate.py</code>):</p>
+<div class="codehl"><pre><span></span><code>1. read the `kid` from the token&#39;s UNVERIFIED header   (routing only)
+2. fetch the provider&#39;s JWKS                            (public keys)
+3. build the signing key whose `kid` matches
+4. jwt.decode(token, key, algorithms=[&quot;RS256&quot;], audience=..., issuer=...)
+</code></pre></div>
+
+<p>If anything is off — bad signature, wrong audience, wrong issuer, expiry — step
+4 raises and the token is rejected. We prove that with a TAMPERED token.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/04_validate_with_jwks.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_validate_with_jwks.py</span></div><pre>========================================================================
+VALIDATE ACCESS TOKEN AGAINST LOCAL JWKS (mirrors tests/validate.py)
+========================================================================
+issuer   : http://localhost:9000
+audience : api://local-resource
+token kid: local-key-0001
+
+VALID ✔  trusted claims:
+  iss: http://localhost:9000
+  aud: api://local-resource
+  sub: user-alice-0001
+  scope: openid api.read
+  roles: [&#x27;reader&#x27;, &#x27;writer&#x27;]
+
+========================================================================
+TAMPERED TOKEN IS REJECTED
+========================================================================
+rejected: InvalidSignatureError: Signature verification failed
+
+OK ✔  genuine token validates; tampered token fails the signature.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_validate_with_jwks.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">04 · Validate the access token against the LOCAL JWKS (the Azure pattern)</span>
+<span class="sd">========================================================================</span>
+
+<span class="sd">This script validates a token EXACTLY the way this repo&#39;s ``tests/validate.py``</span>
+<span class="sd">validates an Azure Entra ID token — only the JWKS source is our local IdP</span>
+<span class="sd">instead of ``login.microsoftonline.com``.</span>
+
+<span class="sd">The canonical steps (identical in shape to ``tests/validate.py``):</span>
+
+<span class="sd">    1. read the `kid` from the token&#39;s UNVERIFIED header   (routing only)</span>
+<span class="sd">    2. fetch the provider&#39;s JWKS                            (public keys)</span>
+<span class="sd">    3. build the signing key whose `kid` matches</span>
+<span class="sd">    4. jwt.decode(token, key, algorithms=[&quot;RS256&quot;], audience=..., issuer=...)</span>
+
+<span class="sd">If anything is off — bad signature, wrong audience, wrong issuer, expiry — step</span>
+<span class="sd">4 raises and the token is rejected. We prove that with a TAMPERED token.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/04_validate_with_jwks.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.server</span><span class="w"> </span><span class="kn">import</span> <span class="n">AUDIENCE</span><span class="p">,</span> <span class="n">ISSUER</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">signing_key_from_jwks</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Local stand-in for PyJWKClient.get_signing_key_from_jwt: pick by kid.</span>
+
+<span class="sd">    PyJWKClient does precisely this against a live URL; here the JWKS dict came</span>
+<span class="sd">    from our in-process IdP. The selection logic is identical.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="n">keyset</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">keyset</span><span class="o">.</span><span class="n">keys</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">key_id</span> <span class="o">==</span> <span class="n">kid</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">key</span><span class="o">.</span><span class="n">key</span>  <span class="c1"># the underlying cryptography public key</span>
+    <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKClientError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no signing key in JWKS for kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">validate_access_token</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate a local access token — same call shape as tests/validate.py.&quot;&quot;&quot;</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">signing_key_from_jwks</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">jwks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">key</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">],</span>
+        <span class="n">audience</span><span class="o">=</span><span class="n">AUDIENCE</span><span class="p">,</span>
+        <span class="n">issuer</span><span class="o">=</span><span class="n">ISSUER</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># LIVE-SERVER equivalent (when the IdP runs under `uv run uvicorn`):</span>
+    <span class="c1">#</span>
+    <span class="c1">#   from jwt import PyJWKClient</span>
+    <span class="c1">#   jwk_client  = PyJWKClient(&quot;http://localhost:9000/jwks.json&quot;)</span>
+    <span class="c1">#   signing_key = jwk_client.get_signing_key_from_jwt(token)</span>
+    <span class="c1">#   claims = jwt.decode(</span>
+    <span class="c1">#       token, signing_key.key, algorithms=[&quot;RS256&quot;],</span>
+    <span class="c1">#       audience=AUDIENCE, issuer=ISSUER,</span>
+    <span class="c1">#   )</span>
+    <span class="c1">#</span>
+    <span class="c1"># This is line-for-line tests/validate.py, with localhost:9000 in place of</span>
+    <span class="c1"># login.microsoftonline.com.</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">login</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;openid api.read&quot;</span><span class="p">)</span>
+    <span class="n">access_token</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">]</span>
+    <span class="n">jwks</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">jwks</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;VALIDATE ACCESS TOKEN AGAINST LOCAL JWKS (mirrors tests/validate.py)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;issuer   : </span><span class="si">{</span><span class="n">ISSUER</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;audience : </span><span class="si">{</span><span class="n">AUDIENCE</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token kid: </span><span class="si">{</span><span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">access_token</span><span class="p">)[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">validate_access_token</span><span class="p">(</span><span class="n">access_token</span><span class="p">,</span> <span class="n">jwks</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">VALID ✔  trusted claims:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;iss&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">,</span> <span class="s2">&quot;roles&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">claims</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TAMPERED TOKEN IS REJECTED&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="c1"># Flip a character in the payload segment -&gt; signature no longer matches.</span>
+    <span class="n">head</span><span class="p">,</span> <span class="n">payload</span><span class="p">,</span> <span class="n">sig</span> <span class="o">=</span> <span class="n">access_token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+    <span class="n">tampered_payload</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;A&quot;</span> <span class="k">if</span> <span class="n">payload</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;A&quot;</span> <span class="k">else</span> <span class="s2">&quot;B&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="n">payload</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+    <span class="n">tampered</span> <span class="o">=</span> <span class="s2">&quot;.&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">head</span><span class="p">,</span> <span class="n">tampered_payload</span><span class="p">,</span> <span class="n">sig</span><span class="p">])</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">validate_access_token</span><span class="p">(</span><span class="n">tampered</span><span class="p">,</span> <span class="n">jwks</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: tampered token accepted!&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWTError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  genuine token validates; tampered token fails the signature.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/04_validate_with_jwks.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_userinfo_endpoint">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Userinfo Endpoint</b><span>05_userinfo_endpoint.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><code>/userinfo</code> is the simplest <em>protected resource</em>: present a valid access
+token as <code>Authorization: Bearer &lt;token&gt;</code> and it returns the user's claims.
+Internally the IdP validates the token just like script 04 (kid -&gt; JWKS key -&gt;
+RS256 decode with issuer+audience pinned). No valid token, no data.</p>
+<p>This demonstrates the resource-server side of the contract: the access token is
+the <em>key to the API</em>, and a bad/forged token is rejected with 401.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/05_userinfo_endpoint.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_userinfo_endpoint.py</span></div><pre>========================================================================
+GET /userinfo  WITH a valid bearer access token
+========================================================================
+HTTP 200
+{
+  &quot;sub&quot;: &quot;user-alice-0001&quot;,
+  &quot;email&quot;: &quot;alice@local.test&quot;,
+  &quot;name&quot;: &quot;Alice Liddell&quot;,
+  &quot;roles&quot;: [
+    &quot;reader&quot;,
+    &quot;writer&quot;
+  ],
+  &quot;scope&quot;: &quot;openid profile email api.read&quot;
+}
+
+========================================================================
+GET /userinfo  WITH a garbage token  -&gt;  401
+========================================================================
+HTTP 401: invalid_token: Invalid header string: &#x27;utf-8&#x27; codec can&#x27;t decode byte 0x9e in position 0: invalid start byte
+
+========================================================================
+GET /userinfo  WITH no Authorization header  -&gt;  401
+========================================================================
+HTTP 401: missing bearer token
+
+OK ✔  the access token unlocks /userinfo; bad/missing tokens are 401.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_userinfo_endpoint.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">05 · The /userinfo endpoint — a protected resource in action</span>
+<span class="sd">============================================================</span>
+
+<span class="sd">``/userinfo`` is the simplest *protected resource*: present a valid access</span>
+<span class="sd">token as ``Authorization: Bearer &lt;token&gt;`` and it returns the user&#39;s claims.</span>
+<span class="sd">Internally the IdP validates the token just like script 04 (kid -&gt; JWKS key -&gt;</span>
+<span class="sd">RS256 decode with issuer+audience pinned). No valid token, no data.</span>
+
+<span class="sd">This demonstrates the resource-server side of the contract: the access token is</span>
+<span class="sd">the *key to the API*, and a bad/forged token is rejected with 401.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/05_userinfo_endpoint.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">login</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;openid profile email api.read&quot;</span><span class="p">)</span>
+    <span class="n">access_token</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GET /userinfo  WITH a valid bearer access token&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">userinfo</span><span class="p">(</span><span class="n">access_token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HTTP </span><span class="si">{</span><span class="n">resp</span><span class="o">.</span><span class="n">status_code</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">resp</span><span class="o">.</span><span class="n">json</span><span class="p">(),</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">200</span>
+    <span class="k">assert</span> <span class="n">resp</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">&quot;email&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;alice@local.test&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GET /userinfo  WITH a garbage token  -&gt;  401&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">userinfo</span><span class="p">(</span><span class="s2">&quot;not.a.realtoken&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HTTP </span><span class="si">{</span><span class="n">bad</span><span class="o">.</span><span class="n">status_code</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">bad</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">&#39;detail&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">bad</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">401</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GET /userinfo  WITH no Authorization header  -&gt;  401&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">none</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">http</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/userinfo&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HTTP </span><span class="si">{</span><span class="n">none</span><span class="o">.</span><span class="n">status_code</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">none</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s1">&#39;detail&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">none</span><span class="o">.</span><span class="n">status_code</span> <span class="o">==</span> <span class="mi">401</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  the access token unlocks /userinfo; bad/missing tokens are 401.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/05_userinfo_endpoint.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_refresh_token_flow">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Refresh Token Flow</b><span>06_refresh_token_flow.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Access tokens are deliberately short-lived (15 minutes here). Rather than make
+the user log in again every 15 minutes, the client keeps the long-lived
+<code>refresh_token</code> and exchanges it at <code>/token</code> for a brand-new access token:</p>
+<div class="codehl"><pre><span></span><code>POST /token
+    grant_type=refresh_token
+    refresh_token=&lt;the opaque token&gt;
+    client_id / client_secret
+</code></pre></div>
+
+<p>This script logs in once, then refreshes, and compares the OLD vs NEW token
+expiry to prove the access token's lifetime was extended.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/06_refresh_token_flow.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_refresh_token_flow.py</span></div><pre>========================================================================
+STEP 1 · initial login (authorization_code grant)
+========================================================================
+access_token  exp: 2026-06-30T20:20:34+00:00
+refresh_token    : 91xRAY00Vc9rCUp1... (kept by the client)
+
+========================================================================
+STEP 2 · refresh_token grant  -&gt;  a fresh access token
+========================================================================
+new access_token exp: 2026-06-30T20:20:34+00:00
+
+========================================================================
+OLD vs NEW
+========================================================================
+old exp: 2026-06-30T20:20:34+00:00
+new exp: 2026-06-30T20:20:34+00:00
+new token is a distinct credential (different jti): True
+new expiry is later or equal: True
+(Issued back-to-back here, so exp can match to the second; in real use
+ the refresh happens minutes later and the new exp strictly advances.)
+
+OK ✔  refresh grant issued a new, longer-lived access token.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_refresh_token_flow.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">06 · The refresh-token grant — fresh access tokens without re-login</span>
+<span class="sd">===================================================================</span>
+
+<span class="sd">Access tokens are deliberately short-lived (15 minutes here). Rather than make</span>
+<span class="sd">the user log in again every 15 minutes, the client keeps the long-lived</span>
+<span class="sd">``refresh_token`` and exchanges it at ``/token`` for a brand-new access token:</span>
+
+<span class="sd">    POST /token</span>
+<span class="sd">        grant_type=refresh_token</span>
+<span class="sd">        refresh_token=&lt;the opaque token&gt;</span>
+<span class="sd">        client_id / client_secret</span>
+
+<span class="sd">This script logs in once, then refreshes, and compares the OLD vs NEW token</span>
+<span class="sd">expiry to prove the access token&#39;s lifetime was extended.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/06_refresh_token_flow.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">exp_of</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">datetime</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the `exp` claim from a JWT without verifying (inspection only).&quot;&quot;&quot;</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">payload</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">],</span> <span class="n">tz</span><span class="o">=</span><span class="n">UTC</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Imported here so the module import line is part of the visible lesson.</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalIdPClient</span>
+
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 · initial login (authorization_code grant)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">login</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;openid api.read&quot;</span><span class="p">)</span>
+    <span class="n">old_access</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">]</span>
+    <span class="n">refresh_token</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;refresh_token&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;access_token  exp: </span><span class="si">{</span><span class="n">exp_of</span><span class="p">(</span><span class="n">old_access</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;refresh_token    : </span><span class="si">{</span><span class="n">refresh_token</span><span class="p">[:</span><span class="mi">16</span><span class="p">]</span><span class="si">}</span><span class="s2">... (kept by the client)&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 · refresh_token grant  -&gt;  a fresh access token&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">refreshed</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">refresh</span><span class="p">(</span><span class="n">refresh_token</span><span class="p">)</span>
+    <span class="n">new_access</span> <span class="o">=</span> <span class="n">refreshed</span><span class="p">[</span><span class="s2">&quot;access_token&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;new access_token exp: </span><span class="si">{</span><span class="n">exp_of</span><span class="p">(</span><span class="n">new_access</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;OLD vs NEW&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;old exp: </span><span class="si">{</span><span class="n">exp_of</span><span class="p">(</span><span class="n">old_access</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;new exp: </span><span class="si">{</span><span class="n">exp_of</span><span class="p">(</span><span class="n">new_access</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;new token is a distinct credential (different jti): </span><span class="si">{</span><span class="n">new_access</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">old_access</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;new expiry is later or equal: </span><span class="si">{</span><span class="n">exp_of</span><span class="p">(</span><span class="n">new_access</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">exp_of</span><span class="p">(</span><span class="n">old_access</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;(Issued back-to-back here, so exp can match to the second; in real use&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; the refresh happens minutes later and the new exp strictly advances.)&quot;</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="n">new_access</span> <span class="o">!=</span> <span class="n">old_access</span>
+    <span class="k">assert</span> <span class="n">exp_of</span><span class="p">(</span><span class="n">new_access</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">exp_of</span><span class="p">(</span><span class="n">old_access</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="s2">&quot;refresh_token&quot;</span> <span class="ow">in</span> <span class="n">refreshed</span>  <span class="c1"># the grant also rotates the refresh token</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  refresh grant issued a new, longer-lived access token.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/06_refresh_token_flow.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_id_token_and_nonce">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>ID Token And Nonce</b><span>07_id_token_and_nonce.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>OAuth2 gives you an <strong>access_token</strong> (a key to an API). OpenID Connect adds an
+<strong>id_token</strong>: proof of <em>who logged in</em>, issued FOR THE CLIENT.</p>
+<p>Key differences:</p>
+<div class="codehl"><pre><span></span><code>access_token   aud = the resource API   &quot;what may I call?&quot;
+id_token       aud = your client_id     &quot;who is this user?&quot;
+</code></pre></div>
+
+<p>The id_token also carries a <code>nonce</code>: a random value the client generates and
+sends on <code>/authorize</code>. The provider copies it into the id_token. The client
+then checks <code>id_token.nonce == the nonce I sent</code> — defeating replay/injection
+of a stolen id_token.</p>
+<p>This script logs in with a nonce, validates the id_token's iss/aud/exp, and
+verifies the nonce round-trips.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/07_id_token_and_nonce.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_id_token_and_nonce.py</span></div><pre>========================================================================
+LOGIN requesting an id_token, sending a nonce
+========================================================================
+sent nonce     : nonce-7f3a-please-echo-me
+id_token header: {&#x27;alg&#x27;: &#x27;RS256&#x27;, &#x27;kid&#x27;: &#x27;local-key-0001&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+
+========================================================================
+VALIDATE id_token (iss / aud=client_id / exp) and nonce round-trip
+========================================================================
+VALID ✔  identity claims:
+  iss: http://localhost:9000
+  aud: local-web-app
+  sub: user-alice-0001
+  email: alice@local.test
+  name: Alice Liddell
+  nonce: nonce-7f3a-please-echo-me
+
+aud == client_id (local-web-app): True
+nonce echoed back correctly    : True
+
+========================================================================
+ATTACK CHECK · a token presented with the WRONG expected nonce fails
+========================================================================
+rejected: InvalidTokenError: nonce mismatch — possible replay
+
+OK ✔  id_token validated; nonce binds it to this exact login.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_id_token_and_nonce.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · The OIDC id_token and the nonce round-trip</span>
+<span class="sd">===============================================</span>
+
+<span class="sd">OAuth2 gives you an **access_token** (a key to an API). OpenID Connect adds an</span>
+<span class="sd">**id_token**: proof of *who logged in*, issued FOR THE CLIENT.</span>
+
+<span class="sd">Key differences:</span>
+
+<span class="sd">    access_token   aud = the resource API   &quot;what may I call?&quot;</span>
+<span class="sd">    id_token       aud = your client_id     &quot;who is this user?&quot;</span>
+
+<span class="sd">The id_token also carries a ``nonce``: a random value the client generates and</span>
+<span class="sd">sends on ``/authorize``. The provider copies it into the id_token. The client</span>
+<span class="sd">then checks ``id_token.nonce == the nonce I sent`` — defeating replay/injection</span>
+<span class="sd">of a stolen id_token.</span>
+
+<span class="sd">This script logs in with a nonce, validates the id_token&#39;s iss/aud/exp, and</span>
+<span class="sd">verifies the nonce round-trips.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/07_id_token_and_nonce.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">CLIENT_ID</span><span class="p">,</span> <span class="n">LocalIdPClient</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.server</span><span class="w"> </span><span class="kn">import</span> <span class="n">ISSUER</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">signing_key_from_jwks</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Select the public key from the JWKS whose kid matches the token.&quot;&quot;&quot;</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="n">keyset</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">keyset</span><span class="o">.</span><span class="n">keys</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">key_id</span> <span class="o">==</span> <span class="n">kid</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">key</span><span class="o">.</span><span class="n">key</span>
+    <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKClientError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no key for kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">validate_id_token</span><span class="p">(</span><span class="n">id_token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">expected_nonce</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate an id_token: signature, iss, aud(=client_id), exp, and nonce.&quot;&quot;&quot;</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">signing_key_from_jwks</span><span class="p">(</span><span class="n">id_token</span><span class="p">,</span> <span class="n">jwks</span><span class="p">)</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">id_token</span><span class="p">,</span>
+        <span class="n">key</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">],</span>
+        <span class="n">audience</span><span class="o">=</span><span class="n">CLIENT_ID</span><span class="p">,</span>  <span class="c1"># id_token audience MUST be our client_id</span>
+        <span class="n">issuer</span><span class="o">=</span><span class="n">ISSUER</span><span class="p">,</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">,</span> <span class="s2">&quot;iss&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">]},</span>
+    <span class="p">)</span>
+    <span class="c1"># nonce is application-level: PyJWT won&#39;t check it for us.</span>
+    <span class="k">if</span> <span class="n">claims</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;nonce&quot;</span><span class="p">)</span> <span class="o">!=</span> <span class="n">expected_nonce</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span><span class="p">(</span><span class="s2">&quot;nonce mismatch — possible replay&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">claims</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">LocalIdPClient</span><span class="p">()</span>
+    <span class="n">sent_nonce</span> <span class="o">=</span> <span class="s2">&quot;nonce-7f3a-please-echo-me&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;LOGIN requesting an id_token, sending a nonce&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">login</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;openid profile email&quot;</span><span class="p">,</span> <span class="n">nonce</span><span class="o">=</span><span class="n">sent_nonce</span><span class="p">)</span>
+    <span class="n">id_token</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[</span><span class="s2">&quot;id_token&quot;</span><span class="p">]</span>
+    <span class="n">jwks</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">jwks</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sent nonce     : </span><span class="si">{</span><span class="n">sent_nonce</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;id_token header: </span><span class="si">{</span><span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">id_token</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;VALIDATE id_token (iss / aud=client_id / exp) and nonce round-trip&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">validate_id_token</span><span class="p">(</span><span class="n">id_token</span><span class="p">,</span> <span class="n">jwks</span><span class="p">,</span> <span class="n">sent_nonce</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;VALID ✔  identity claims:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;iss&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="s2">&quot;email&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;nonce&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">claims</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">aud == client_id (</span><span class="si">{</span><span class="n">CLIENT_ID</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">claims</span><span class="p">[</span><span class="s1">&#39;aud&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CLIENT_ID</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;nonce echoed back correctly    : </span><span class="si">{</span><span class="n">claims</span><span class="p">[</span><span class="s1">&#39;nonce&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">sent_nonce</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ATTACK CHECK · a token presented with the WRONG expected nonce fails&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">validate_id_token</span><span class="p">(</span><span class="n">id_token</span><span class="p">,</span> <span class="n">jwks</span><span class="p">,</span> <span class="s2">&quot;some-other-nonce&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: mismatched nonce accepted!&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  id_token validated; nonce binds it to this exact login.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/07_id_token_and_nonce.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_key_rotation_live">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Key Rotation Live</b><span>08_key_rotation_live.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Providers periodically retire their signing key and start signing with a new
+one. If they swapped instantly, every token signed by the old key would break
+the moment clients refreshed the JWKS. The fix: publish a SET of keys (current +
+next) and route by <code>kid</code>. A token verifies as long as its <code>kid</code> is still in
+the JWKS — regardless of which published key signed it.</p>
+<p>This script:</p>
+<div class="codehl"><pre><span></span><code>1. publishes two keys and signs a token with EACH — both validate;
+2. rotates (current -&gt; retired, next -&gt; current, new next minted);
+3. shows the token from the still-published key keeps validating;
+4. shows the token from the RETIRED key now fails (its kid left the JWKS).
+</code></pre></div>
+
+<p>It mutates the IdP's live <code>KeyManager</code> (<code>idp.server.keys</code>) directly.</p>
+<p>Run:
+    uv run python pyjwt-course/16-local-identity-provider/08_key_rotation_live.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_key_rotation_live.py</span></div><pre>========================================================================
+BEFORE ROTATION · two keys published
+========================================================================
+published kids: [&#x27;local-key-0001&#x27;, &#x27;local-key-0002&#x27;]
+token signed by current (local-key-0001) -&gt; VALID ✔
+token signed by next    (local-key-0002) -&gt; VALID ✔
+Both published keys validate — that&#x27;s why a set is published.
+
+========================================================================
+ROTATE · current retires, next becomes current, a new next is minted
+========================================================================
+retired kid   : local-key-0001
+published kids: [&#x27;local-key-0002&#x27;, &#x27;local-key-0003&#x27;]
+
+========================================================================
+AFTER ROTATION · who still validates?
+========================================================================
+token signed by local-key-0002 (now current) -&gt; STILL VALID ✔
+token signed by local-key-0001 (retired) -&gt; REJECTED: no published key for kid=&#x27;local-key-0001&#x27;
+
+OK ✔  rotation kept valid tokens working and aged the old key out.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_key_rotation_live.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · Live key rotation — why providers publish more than one key</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">Providers periodically retire their signing key and start signing with a new</span>
+<span class="sd">one. If they swapped instantly, every token signed by the old key would break</span>
+<span class="sd">the moment clients refreshed the JWKS. The fix: publish a SET of keys (current +</span>
+<span class="sd">next) and route by ``kid``. A token verifies as long as its ``kid`` is still in</span>
+<span class="sd">the JWKS — regardless of which published key signed it.</span>
+
+<span class="sd">This script:</span>
+
+<span class="sd">    1. publishes two keys and signs a token with EACH — both validate;</span>
+<span class="sd">    2. rotates (current -&gt; retired, next -&gt; current, new next minted);</span>
+<span class="sd">    3. shows the token from the still-published key keeps validating;</span>
+<span class="sd">    4. shows the token from the RETIRED key now fails (its kid left the JWKS).</span>
+
+<span class="sd">It mutates the IdP&#39;s live ``KeyManager`` (``idp.server.keys``) directly.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    uv run python pyjwt-course/16-local-identity-provider/08_key_rotation_live.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">idp.server</span><span class="w"> </span><span class="kn">import</span> <span class="n">AUDIENCE</span><span class="p">,</span> <span class="n">ISSUER</span><span class="p">,</span> <span class="n">keys</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sign_access_token</span><span class="p">(</span><span class="n">signer</span><span class="p">,</span> <span class="n">sub</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;user-alice-0001&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Sign a minimal RS256 access token with a SPECIFIC signing key.&quot;&quot;&quot;</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="n">ISSUER</span><span class="p">,</span>
+            <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">AUDIENCE</span><span class="p">,</span>
+            <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="n">sub</span><span class="p">,</span>
+            <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="s2">&quot;api.read&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
+            <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">15</span><span class="p">),</span>
+        <span class="p">},</span>
+        <span class="n">signer</span><span class="o">.</span><span class="n">private_key</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">signer</span><span class="o">.</span><span class="n">kid</span><span class="p">},</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">validate</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jwks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Validate a token by selecting its key from the CURRENT JWKS via kid.&quot;&quot;&quot;</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="n">keyset</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">jwks</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">keyset</span><span class="o">.</span><span class="n">keys</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">key_id</span> <span class="o">==</span> <span class="n">kid</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+                <span class="n">token</span><span class="p">,</span> <span class="n">key</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">],</span>
+                <span class="n">audience</span><span class="o">=</span><span class="n">AUDIENCE</span><span class="p">,</span> <span class="n">issuer</span><span class="o">=</span><span class="n">ISSUER</span><span class="p">,</span>
+            <span class="p">)</span>
+    <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKClientError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no published key for kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;BEFORE ROTATION · two keys published&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;published kids: </span><span class="si">{</span><span class="p">[</span><span class="n">k</span><span class="p">[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">keys</span><span class="o">.</span><span class="n">jwks</span><span class="p">()[</span><span class="s1">&#39;keys&#39;</span><span class="p">]]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">current_key</span> <span class="o">=</span> <span class="n">keys</span><span class="o">.</span><span class="n">current</span>
+    <span class="n">next_key</span> <span class="o">=</span> <span class="n">keys</span><span class="o">.</span><span class="n">next</span>
+    <span class="n">token_from_current</span> <span class="o">=</span> <span class="n">sign_access_token</span><span class="p">(</span><span class="n">current_key</span><span class="p">)</span>
+    <span class="n">token_from_next</span> <span class="o">=</span> <span class="n">sign_access_token</span><span class="p">(</span><span class="n">next_key</span><span class="p">)</span>
+
+    <span class="n">jwks_before</span> <span class="o">=</span> <span class="n">keys</span><span class="o">.</span><span class="n">jwks</span><span class="p">()</span>
+    <span class="n">validate</span><span class="p">(</span><span class="n">token_from_current</span><span class="p">,</span> <span class="n">jwks_before</span><span class="p">)</span>
+    <span class="n">validate</span><span class="p">(</span><span class="n">token_from_next</span><span class="p">,</span> <span class="n">jwks_before</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed by current (</span><span class="si">{</span><span class="n">current_key</span><span class="o">.</span><span class="n">kid</span><span class="si">}</span><span class="s2">) -&gt; VALID ✔&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed by next    (</span><span class="si">{</span><span class="n">next_key</span><span class="o">.</span><span class="n">kid</span><span class="si">}</span><span class="s2">) -&gt; VALID ✔&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Both published keys validate — that&#39;s why a set is published.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ROTATE · current retires, next becomes current, a new next is minted&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">retired</span> <span class="o">=</span> <span class="n">keys</span><span class="o">.</span><span class="n">rotate</span><span class="p">()</span>
+    <span class="n">jwks_after</span> <span class="o">=</span> <span class="n">keys</span><span class="o">.</span><span class="n">jwks</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;retired kid   : </span><span class="si">{</span><span class="n">retired</span><span class="o">.</span><span class="n">kid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;published kids: </span><span class="si">{</span><span class="p">[</span><span class="n">k</span><span class="p">[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">jwks_after</span><span class="p">[</span><span class="s1">&#39;keys&#39;</span><span class="p">]]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AFTER ROTATION · who still validates?&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="c1"># token_from_next was signed by the key that is now `current` -&gt; still published.</span>
+    <span class="n">validate</span><span class="p">(</span><span class="n">token_from_next</span><span class="p">,</span> <span class="n">jwks_after</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed by </span><span class="si">{</span><span class="n">next_key</span><span class="o">.</span><span class="n">kid</span><span class="si">}</span><span class="s2"> (now current) -&gt; STILL VALID ✔&quot;</span><span class="p">)</span>
+
+    <span class="c1"># token_from_current was signed by the now-retired key -&gt; kid gone from JWKS.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">validate</span><span class="p">(</span><span class="n">token_from_current</span><span class="p">,</span> <span class="n">jwks_after</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: retired-key token still accepted!&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">PyJWKClientError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed by </span><span class="si">{</span><span class="n">retired</span><span class="o">.</span><span class="n">kid</span><span class="si">}</span><span class="s2"> (retired) -&gt; REJECTED: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">OK ✔  rotation kept valid tokens working and aged the old key out.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/16-local-identity-provider/08_key_rotation_live.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="15-real-world-fastapi-oauth.html"><div class="dir">← Previous</div><div class="ttl">15 · Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</div></a><a class="next" href="../playground.html"><div class="dir">Next →</div><div class="ttl">▶ Playground</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

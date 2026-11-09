@@ -1,0 +1,1587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 13 · Cryptography Deep Dive · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html" class="active"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>13 · Module 13 · Cryptography Deep Dive</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#f472b6,#db2777)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#f472b6;border-color:#f472b655;background:#f472b611">Module 13</span>
+  <h1 style="margin-top:18px">Module 13 · Cryptography Deep Dive</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>Strip the JSON costume off any JWT and you find three classic cryptographic primitives stacked on top of each other: <strong>hashing → MACs → digital signatures.</strong> A <strong>hash</strong> like SHA-256 is a one-way function: feed it any number of bytes and it spits out a fixed-size digest (32 bytes for SHA-256) that is infeasible to reverse. Flip a single input bit and roughly half the output bits flip — the <strong>avalanche effect</strong>. A hash proves the bytes didn't change <em>by accident</em>: that's <strong>integrity</strong>. But it proves nothing about <em>who</em> produced them, because anyone can recompute a hash. Integrity without <strong>authenticity</strong> is not security.</p>
+<p>To add authenticity you mix a <strong>secret</strong> into the hash. That's an <strong>HMAC</strong> (Hash-based Message Authentication Code), and HMAC-SHA256 is <em>literally</em> the engine behind <code>HS256</code>. The reveal that makes JWTs click: an HS256 signature is exactly <code>base64url( HMAC-SHA256( "header.payload", secret ) )</code>. You can recompute it by hand with Python's <code>hmac</code> module and watch it come out <strong>byte-for-byte identical</strong> to the token's third segment. There is no magic — the verifier simply recomputes the same HMAC and compares with a constant-time check (<code>hmac.compare_digest</code>, never <code>==</code>, to avoid timing leaks). An attacker without the secret can't produce a matching segment.</p>
+<p>HMAC is <strong>symmetric</strong>: the same secret both signs and verifies, so everyone who can verify can also forge. That's fine inside one trust boundary but useless for the public internet. <strong>Digital signatures</strong> solve this with <strong>asymmetric</strong> key pairs: a <strong>private</strong> key signs, and a mathematically-linked <strong>public</strong> key verifies. The private key never leaves the issuer; the public key can be published to the entire world (that's what JWKS does). This is why <code>RS256</code>/<code>ES256</code>/<code>PS256</code>/<code>EdDSA</code> let any client verify a provider's tokens while being unable to mint one. The security rests on <strong>trapdoor functions</strong> — operations easy one way but infeasible to reverse (integer factoring for RSA, the discrete-log problem on elliptic curves for ECDSA/EdDSA).</p>
+<p>Finally, the <em>same</em> key wears different clothes depending on context: <strong>PEM</strong> (base64 text with <code>-----BEGIN-----</code> headers, what PyJWT usually wants), <strong>DER</strong> (the raw binary encoding underneath PEM), and <strong>JWK</strong> (the JSON form served by JWKS endpoints). Converting between them never changes the key — only its packaging.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>A <strong>hash</strong> is a tamper-evident seal: break it and you can tell something changed, but anyone can buy the same seal. An <strong>HMAC</strong> is a seal pressed with a <em>shared signet ring</em> — only ring-holders can make or check it. A <strong>digital signature</strong> is a wax seal from a ring whose <em>impression</em> is published in the town square: everyone can confirm the impression matches the public pattern, but only the ring's owner can press a genuine one. Publishing the impression (public key) never lets anyone carve the ring (private key).</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li>SHA-256 reduces arbitrary input to a fixed 32-byte digest; changing one character produces a wildly different digest (avalanche).</li>
+<li>A demo shows a bare hash gives integrity but <strong>not</strong> authenticity — an attacker just recomputes it over their own forged payload.</li>
+<li>PyJWT mints an HS256 token; the script splits off <code>header.payload.signature</code>.</li>
+<li>Python's <code>hmac.new(secret, "header.payload", sha256).digest()</code> is computed independently and base64url-encoded without padding.</li>
+<li>The hand-computed value is compared against the token's third segment — they match exactly, proving <code>HS256 == base64url(HMAC-SHA256)</code>.</li>
+<li>An RSA private key signs a message and the public key verifies it, demonstrating the asymmetric (sign=private / verify=public) split behind <code>RS256</code>.</li>
+<li>One public key is serialized three ways — PEM, DER (hex), JWK — showing they're the same key in different formats.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li><code>01_hashing_sha2.py</code>: the digest length is <strong>fixed</strong> regardless of input size, and a one-character change scrambles the whole output.</li>
+<li><code>03_hmac_from_scratch.py</code>: the <code>IDENTICAL? True</code> line is the course's big "aha" — your handmade HMAC equals PyJWT's signature segment.</li>
+<li><code>05_digital_signatures.py</code>: the <em>private</em> key signs, the <em>public</em> key verifies, and swapping in the wrong public key fails.</li>
+<li><code>08_algorithm_family_tour.py</code>: signature <strong>lengths</strong> differ per family, and ECDSA/RSA-PSS produce a <em>different</em> signature each run (they're randomized — by design).</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"Hashing is encryption."</strong> No — hashing is one-way; there is no "unhash" and you can't recover a payload from a signature.</li>
+<li><strong>"A hash alone authenticates the sender."</strong> It only proves integrity; without a secret or private key, anyone can recompute it.</li>
+<li><strong>"Publishing a public key is risky."</strong> Trapdoor math makes deriving the private key infeasible — publishing it is the intended design.</li>
+<li><strong>"A different signature each run means it's broken."</strong> ECDSA and RSA-PSS are intentionally randomized; identical-every-time is <em>not</em> required.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-13-cryptography-deep-dive">🔬 Module 13 · Cryptography Deep Dive</h1>
+<blockquote>
+<p><em>"A JWT is cryptography wearing a JSON costume."</em></p>
+</blockquote>
+<p>Every signing algorithm in PyJWT — <code>HS256</code>, <code>RS256</code>, <code>ES256</code>, <code>PS256</code>, <code>EdDSA</code> —
+is a thin wrapper around classic cryptographic primitives. This module strips
+the costume off and rebuilds the machinery from the ground up: <strong>hashes →
+MACs → digital signatures → key formats → the full algorithm zoo.</strong></p>
+<p>By the end you'll be able to recompute an HS256 signature <em>by hand</em> and explain
+exactly why you can publish an RSA public key to the entire internet.</p>
+<hr />
+<h2 id="the-mental-model">🧠 The mental model</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    H[SHA-2 hash&lt;br/&gt;integrity only] --&gt; M[HMAC&lt;br/&gt;+ shared secret&lt;br/&gt;= HS256]
+    H --&gt; S[Digital signature&lt;br/&gt;+ private key&lt;br/&gt;= RS256 / ES256 / EdDSA]
+    M --&gt; J[JWT signature]
+    S --&gt; J
+    J --&gt; K[Key formats&lt;br/&gt;PEM · DER · JWK]</div></div>
+<ul>
+<li>A <strong>hash</strong> proves the bits didn't change <em>by accident</em> (integrity), but anyone
+  can recompute it — no authenticity.</li>
+<li>Add a <strong>shared secret</strong> → <strong>HMAC</strong> → that's <code>HS256</code>.</li>
+<li>Add a <strong>private/public key pair</strong> → <strong>digital signature</strong> → that's
+  <code>RS256</code> / <code>ES256</code> / <code>PS256</code> / <code>EdDSA</code>.</li>
+<li>Keys travel as <strong>PEM</strong>, <strong>DER</strong>, or <strong>JWK</strong> depending on where they're used.</li>
+</ul>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_hashing_sha2"><code>01_hashing_sha2.py</code></a></td>
+<td>SHA-256/384/512 digests, one-way hashing, fixed size, the avalanche effect</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/01_hashing_sha2.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_why_hashes_arent_enough"><code>02_why_hashes_arent_enough.py</code></a></td>
+<td>A bare hash gives integrity but <strong>not</strong> authenticity — an attacker just recomputes it</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/02_why_hashes_arent_enough.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_hmac_from_scratch"><code>03_hmac_from_scratch.py</code></a></td>
+<td><strong>The aha:</strong> recompute HMAC-SHA256 and prove it equals the HS256 token's 3rd segment</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/03_hmac_from_scratch.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_symmetric_vs_asymmetric"><code>04_symmetric_vs_asymmetric.py</code></a></td>
+<td>One shared secret vs. a key pair + a full tradeoff table</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/04_symmetric_vs_asymmetric.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_digital_signatures"><code>05_digital_signatures.py</code></a></td>
+<td>Sign with the RSA private key, verify with the public key — the engine behind <code>RS256</code></td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/05_digital_signatures.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_public_key_crypto_intuition"><code>06_public_key_crypto_intuition.py</code></a></td>
+<td>Trapdoor functions: why publishing a public key is safe; RSA vs. ECDSA</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/06_public_key_crypto_intuition.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_key_formats_pem_der_jwk"><code>07_key_formats_pem_der_jwk.py</code></a></td>
+<td>One RSA public key serialized as PEM, DER (hex), and JWK</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/07_key_formats_pem_der_jwk.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_algorithm_family_tour"><code>08_algorithm_family_tour.py</code></a></td>
+<td>Sign with one alg per family; compare header <code>alg</code> + signature lengths</td>
+<td><code>.venv/bin/python pyjwt-course/13-cryptography-deep-dive/08_algorithm_family_tour.py</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Run everything at once:
+<code>bash
+for f in pyjwt-course/13-cryptography-deep-dive/0*.py; do .venv/bin/python "$f"; done</code></p>
+</blockquote>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ol>
+<li><strong><code>HS256</code> is <code>base64url(HMAC-SHA256(header.payload, secret))</code>.</strong> Script 03
+   proves it byte-for-byte. Once you see it, JWTs stop being magic.</li>
+<li><strong>Hash ≠ MAC ≠ signature.</strong> A hash gives integrity; a MAC (HMAC) adds
+   authenticity with a <em>shared</em> secret; a signature adds authenticity with a
+   <em>private</em> key that the verifier never sees.</li>
+<li><strong>Sign = private, verify = public.</strong> This single sentence explains why
+   identity providers can publish keys via JWKS and the world can verify their
+   tokens without ever being able to forge one.</li>
+<li><strong>Trapdoor functions</strong> (factoring for RSA, discrete log for EC) make it
+   infeasible to derive the private key from the public key.</li>
+<li><strong>PEM / DER / JWK are the same key, different clothes.</strong> JWKS endpoints serve
+   JWK; PyJWT arguments usually want PEM; DER is the underlying binary.</li>
+</ol>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>Don't confuse hashing with encryption.</strong> Hashing is one-way; there is no
+  "unhash". You cannot recover a payload from a signature.</li>
+<li><strong>Never compare signatures with <code>==</code>.</strong> Use <code>hmac.compare_digest</code> to avoid
+  timing side-channels (PyJWT does this for you internally).</li>
+<li><strong>HMAC keys should be ≥ 32 bytes</strong> for SHA-256 (RFC 7518 §3.2). Short secrets
+  trigger PyJWT's <code>InsecureKeyLengthWarning</code>.</li>
+<li><strong>ECDSA and RSA-PSS signatures are randomised</strong> — the same input yields a
+  different signature each run. That's by design, not a bug.</li>
+</ul>
+<p>➡️ Next: <a href="14-security-best-practices.html">Module 14 · Security Best Practices</a> —
+where this crypto knowledge becomes your defense against real attacks.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_hashing_sha2" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Hashing Sha2</b><span>01_hashing_sha2.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A <em>cryptographic hash function</em> takes an input of ANY size and produces a
+fixed-size "digest". JWTs lean on the SHA-2 family (SHA-256/384/512): the "256"
+in <code>HS256</code> / <code>RS256</code> / <code>ES256</code> literally means "SHA-256".</p>
+<p>Three properties we demonstrate below:</p>
+<ol>
+<li><strong>One-way (preimage resistance)</strong> — given a digest you cannot feasibly
+   recover the input. Hashing is NOT encryption; there is no "unhash".</li>
+<li><strong>Fixed output size</strong> — a 3-byte input and a 3-megabyte input both produce a
+   256-bit (32-byte / 64 hex-char) digest for SHA-256.</li>
+<li><strong>Avalanche effect</strong> — flipping a single character changes ~half the output
+   bits, producing a totally different-looking digest.</li>
+</ol>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/01_hashing_sha2.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_hashing_sha2.py</span></div><pre>======================================================================
+SHA-2 DIGESTS OF THE SAME MESSAGE
+======================================================================
+Message: &#x27;The quick brown fox jumps over the lazy dog&#x27;
+
+SHA256   -&gt; d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592
+            (256 bits, 64 hex chars)
+
+SHA384   -&gt; ca737f1014a48f4c0b6dd43cb177b0afd9e5169367544c494011e3317dbf9a509cb1e5dc1e85a941bbee3d7f2afbc9b1
+            (384 bits, 96 hex chars)
+
+SHA512   -&gt; 07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb642e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6
+            (512 bits, 128 hex chars)
+
+======================================================================
+FIXED OUTPUT SIZE — tiny vs huge input, same digest length
+======================================================================
+SHA-256 of 2-byte input        -&gt; 8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4 (64 hex)
+SHA-256 of 3,000,000-byte input -&gt; 9f04168ec3b8181af6c8408f8976680df5d524d68ded7ea37e78d856a9404cf7 (64 hex)
+Both digests are exactly 64 hex chars. Size in, fixed size out.
+
+======================================================================
+AVALANCHE EFFECT — change one character, get a new universe
+======================================================================
+Original: &#x27;Attack at dawn&#x27;
+  -&gt; fa43ee5373a7f36d491be9e57617eae18ad62f3f85d5ceef78ee39fe00ce5eeb
+Tampered: &#x27;Attack at dusk&#x27;
+  -&gt; c348059a65437cf0eac331d86192065e8bf952a60d3287215a9541b3b2862d1f
+
+Bits changed: 134/256 (~52%). A small input change scrambles half the output.
+
+======================================================================
+ONE-WAY: there is no hashlib.unsha256(). You cannot reverse a digest.
+This integrity property is exactly what JWT signatures are built on.
+======================================================================</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_hashing_sha2.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">01 · Hashing with SHA-2 — the foundation under every JWT signature</span>
+<span class="sd">===================================================================</span>
+
+<span class="sd">A *cryptographic hash function* takes an input of ANY size and produces a</span>
+<span class="sd">fixed-size &quot;digest&quot;. JWTs lean on the SHA-2 family (SHA-256/384/512): the &quot;256&quot;</span>
+<span class="sd">in ``HS256`` / ``RS256`` / ``ES256`` literally means &quot;SHA-256&quot;.</span>
+
+<span class="sd">Three properties we demonstrate below:</span>
+
+<span class="sd">1. **One-way (preimage resistance)** — given a digest you cannot feasibly</span>
+<span class="sd">   recover the input. Hashing is NOT encryption; there is no &quot;unhash&quot;.</span>
+<span class="sd">2. **Fixed output size** — a 3-byte input and a 3-megabyte input both produce a</span>
+<span class="sd">   256-bit (32-byte / 64 hex-char) digest for SHA-256.</span>
+<span class="sd">3. **Avalanche effect** — flipping a single character changes ~half the output</span>
+<span class="sd">   bits, producing a totally different-looking digest.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/01_hashing_sha2.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">digest</span><span class="p">(</span><span class="n">algorithm</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the hex digest of ``data`` using the named SHA-2 algorithm.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">algorithm</span><span class="p">)</span>
+    <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">hamming_distance_hex</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Count how many *bits* differ between two equal-length hex digests.&quot;&quot;&quot;</span>
+    <span class="n">a_int</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span>
+    <span class="n">b_int</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">bin</span><span class="p">(</span><span class="n">a_int</span> <span class="o">^</span> <span class="n">b_int</span><span class="p">)</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">&quot;1&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SHA-2 DIGESTS OF THE SAME MESSAGE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">message</span> <span class="o">=</span> <span class="s2">&quot;The quick brown fox jumps over the lazy dog&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Message: </span><span class="si">{</span><span class="n">message</span><span class="si">!r}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">algorithm</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="s2">&quot;sha384&quot;</span><span class="p">,</span> <span class="s2">&quot;sha512&quot;</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="n">algorithm</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+        <span class="c1"># Output is fixed size regardless of input length.</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">algorithm</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">:</span><span class="s2">8</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">8</span><span class="si">}</span><span class="s2">    (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">4</span><span class="si">}</span><span class="s2"> bits, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="si">}</span><span class="s2"> hex chars)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FIXED OUTPUT SIZE — tiny vs huge input, same digest length&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">tiny</span> <span class="o">=</span> <span class="s2">&quot;hi&quot;</span>
+    <span class="n">huge</span> <span class="o">=</span> <span class="s2">&quot;A&quot;</span> <span class="o">*</span> <span class="mi">3_000_000</span>  <span class="c1"># ~3 MB of data</span>
+    <span class="n">tiny_d</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="n">tiny</span><span class="p">)</span>
+    <span class="n">huge_d</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="n">huge</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SHA-256 of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tiny</span><span class="p">)</span><span class="si">}</span><span class="s2">-byte input        -&gt; </span><span class="si">{</span><span class="n">tiny_d</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tiny_d</span><span class="p">)</span><span class="si">}</span><span class="s2"> hex)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SHA-256 of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">huge</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">-byte input -&gt; </span><span class="si">{</span><span class="n">huge_d</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">huge_d</span><span class="p">)</span><span class="si">}</span><span class="s2"> hex)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Both digests are exactly 64 hex chars. Size in, fixed size out.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AVALANCHE EFFECT — change one character, get a new universe&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">original</span> <span class="o">=</span> <span class="s2">&quot;Attack at dawn&quot;</span>
+    <span class="n">tampered</span> <span class="o">=</span> <span class="s2">&quot;Attack at dusk&quot;</span>  <span class="c1"># changed &#39;aw&#39; -&gt; &#39;us&#39; (a couple of chars)</span>
+    <span class="n">od</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="n">original</span><span class="p">)</span>
+    <span class="n">td</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="n">tampered</span><span class="p">)</span>
+    <span class="n">bits_changed</span> <span class="o">=</span> <span class="n">hamming_distance_hex</span><span class="p">(</span><span class="n">od</span><span class="p">,</span> <span class="n">td</span><span class="p">)</span>
+    <span class="n">total_bits</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">od</span><span class="p">)</span> <span class="o">*</span> <span class="mi">4</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Original: </span><span class="si">{</span><span class="n">original</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; </span><span class="si">{</span><span class="n">od</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tampered: </span><span class="si">{</span><span class="n">tampered</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; </span><span class="si">{</span><span class="n">td</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Bits changed: </span><span class="si">{</span><span class="n">bits_changed</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_bits</span><span class="si">}</span><span class="s2"> &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;(~</span><span class="si">{</span><span class="n">bits_changed</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">total_bits</span><span class="si">:</span><span class="s2">.0%</span><span class="si">}</span><span class="s2">). A small input change &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;scrambles half the output.&quot;</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ONE-WAY: there is no hashlib.unsha256(). You cannot reverse a digest.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;This integrity property is exactly what JWT signatures are built on.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/01_hashing_sha2.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_why_hashes_arent_enough">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Why Hashes Arent Enough</b><span>02_why_hashes_arent_enough.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A bare hash gives you <strong>integrity</strong>: if you have the message <em>and</em> its digest,
+you can detect accidental corruption by re-hashing and comparing.</p>
+<p>But a bare hash gives you NO <strong>authenticity</strong>. Anyone who can change the message
+can simply recompute the hash to match. There is no secret involved, so the
+digest proves nothing about <em>who</em> produced it.</p>
+<div class="codehl"><pre><span></span><code>integrity   = &quot;the bits didn&#39;t change by accident&quot;
+authenticity = &quot;the bits came from someone who holds a secret/key&quot;
+</code></pre></div>
+
+<p>This script plays the attacker: we intercept a (message, hash) pair, rewrite the
+message, recompute the hash, and the receiver's naive check still passes. This
+is the motivation for <strong>MACs</strong> (next script: HMAC) and digital signatures.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/02_why_hashes_arent_enough.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_why_hashes_arent_enough.py</span></div><pre>======================================================================
+STEP 1 — Alice sends a message plus its SHA-256 hash
+======================================================================
+message      : &#x27;Pay Bob $100&#x27;
+sha256(msg)  : ab08a25e535550241188537da46324a9137e8b80b38f2e965da5b59fb5addaff
+Alice transmits BOTH over the wire.
+
+======================================================================
+STEP 2 — The receiver verifies (integrity check passes)
+======================================================================
+receiver accepts original? True
+
+======================================================================
+STEP 3 — Mallory (attacker) intercepts and tampers
+======================================================================
+forged message: &#x27;Pay Mallory $10000&#x27;
+forged hash   : e5042d8a03e53a96e7721c472285175948228fe71f44dfc47614f591edcc5350
+Mallory replaces both fields and forwards them on.
+
+======================================================================
+STEP 4 — The naive receiver is fooled
+======================================================================
+receiver accepts forgery? True  &lt;-- DISASTER
+
+The hash matched, so the receiver &#x27;trusts&#x27; the message — but it came
+from an attacker. A plain hash proves integrity, NOT authenticity.
+
+======================================================================
+THE FIX (preview)
+======================================================================
+Mix a SECRET into the hash so only key-holders can produce a valid tag:
+  - shared secret  -&gt; HMAC  (HS256)      [next script]
+  - private key    -&gt; signature (RS256)  [script 05]
+Mallory has neither, so she can no longer forge a matching tag.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_why_hashes_arent_enough.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">02 · Why a plain hash isn&#39;t enough — integrity vs. authenticity</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">A bare hash gives you **integrity**: if you have the message *and* its digest,</span>
+<span class="sd">you can detect accidental corruption by re-hashing and comparing.</span>
+
+<span class="sd">But a bare hash gives you NO **authenticity**. Anyone who can change the message</span>
+<span class="sd">can simply recompute the hash to match. There is no secret involved, so the</span>
+<span class="sd">digest proves nothing about *who* produced it.</span>
+
+<span class="sd">    integrity   = &quot;the bits didn&#39;t change by accident&quot;</span>
+<span class="sd">    authenticity = &quot;the bits came from someone who holds a secret/key&quot;</span>
+
+<span class="sd">This script plays the attacker: we intercept a (message, hash) pair, rewrite the</span>
+<span class="sd">message, recompute the hash, and the receiver&#39;s naive check still passes. This</span>
+<span class="sd">is the motivation for **MACs** (next script: HMAC) and digital signatures.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/02_why_hashes_arent_enough.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sha256_hex</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">receiver_accepts</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">claimed_hash</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A naive receiver: trusts the message if SHA-256(message) == claimed_hash.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">sha256_hex</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="o">==</span> <span class="n">claimed_hash</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 — Alice sends a message plus its SHA-256 hash&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">alice_message</span> <span class="o">=</span> <span class="s2">&quot;Pay Bob $100&quot;</span>
+    <span class="n">alice_hash</span> <span class="o">=</span> <span class="n">sha256_hex</span><span class="p">(</span><span class="n">alice_message</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;message      : </span><span class="si">{</span><span class="n">alice_message</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sha256(msg)  : </span><span class="si">{</span><span class="n">alice_hash</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Alice transmits BOTH over the wire.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 — The receiver verifies (integrity check passes)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;receiver accepts original? </span><span class="si">{</span><span class="n">receiver_accepts</span><span class="p">(</span><span class="n">alice_message</span><span class="p">,</span><span class="w"> </span><span class="n">alice_hash</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3 — Mallory (attacker) intercepts and tampers&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># Mallory rewrites the message AND recomputes the hash. No secret needed.</span>
+    <span class="n">mallory_message</span> <span class="o">=</span> <span class="s2">&quot;Pay Mallory $10000&quot;</span>
+    <span class="n">mallory_hash</span> <span class="o">=</span> <span class="n">sha256_hex</span><span class="p">(</span><span class="n">mallory_message</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;forged message: </span><span class="si">{</span><span class="n">mallory_message</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;forged hash   : </span><span class="si">{</span><span class="n">mallory_hash</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Mallory replaces both fields and forwards them on.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 4 — The naive receiver is fooled&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">fooled</span> <span class="o">=</span> <span class="n">receiver_accepts</span><span class="p">(</span><span class="n">mallory_message</span><span class="p">,</span> <span class="n">mallory_hash</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;receiver accepts forgery? </span><span class="si">{</span><span class="n">fooled</span><span class="si">}</span><span class="s2">  &lt;-- DISASTER&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">The hash matched, so the receiver &#39;trusts&#39; the message — but it came</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;from an attacker. A plain hash proves integrity, NOT authenticity.&quot;</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE FIX (preview)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="s2">&quot;Mix a SECRET into the hash so only key-holders can produce a valid tag:</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;  - shared secret  -&gt; HMAC  (HS256)      [next script]</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;  - private key    -&gt; signature (RS256)  [script 05]</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;Mallory has neither, so she can no longer forge a matching tag.&quot;</span>
+    <span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/02_why_hashes_arent_enough.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_hmac_from_scratch">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>HMAC From Scratch</b><span>03_hmac_from_scratch.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The big reveal: an HS256 JWT signature is <em>just</em> an HMAC-SHA256, base64url-
+encoded. Nothing magic. In this script we:</p>
+<ol>
+<li>Build an HS256 JWT with PyJWT.</li>
+<li>Split it into its three dot-separated segments: header.payload.signature.</li>
+<li>Independently compute HMAC-SHA256 over the ASCII bytes of
+   <code>f"{header}.{payload}"</code> using Python's <code>hmac</code> module + our secret.</li>
+<li>base64url-encode (no padding) our raw HMAC and show it is byte-for-byte
+   identical to the token's third segment.</li>
+</ol>
+<p>That equality is the whole trick behind HS256. The verifier recomputes the same
+HMAC and compares — an attacker without the secret cannot.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/03_hmac_from_scratch.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_hmac_from_scratch.py</span></div><pre>======================================================================
+STEP 1 — Let PyJWT mint an HS256 token
+======================================================================
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsImFkbWluIjp0cnVlfQ.qBNFxPBXffqwJtOR_7ACuDLx4nxpA-lxSuM5v85ZolE
+
+header    segment: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+payload   segment: eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsImFkbWluIjp0cnVlfQ
+signature segment: qBNFxPBXffqwJtOR_7ACuDLx4nxpA-lxSuM5v85ZolE
+
+======================================================================
+STEP 2 — Compute HMAC-SHA256 ourselves over &#x27;header.payload&#x27;
+======================================================================
+signing input (bytes): b&#x27;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsImFkbWluIjp0cnVlfQ&#x27;
+raw HMAC-SHA256 (hex): a81345c4f0577dfab026d391ffb002b832f1e27c6903e9714ae339bfce59a251
+our base64url signature: qBNFxPBXffqwJtOR_7ACuDLx4nxpA-lxSuM5v85ZolE
+
+======================================================================
+STEP 3 — Compare against the token&#x27;s signature segment
+======================================================================
+PyJWT signature : qBNFxPBXffqwJtOR_7ACuDLx4nxpA-lxSuM5v85ZolE
+our  signature  : qBNFxPBXffqwJtOR_7ACuDLx4nxpA-lxSuM5v85ZolE
+
+IDENTICAL? True  &lt;-- the &#x27;aha&#x27;: HS256 signature == base64url(HMAC)
+
+======================================================================
+STEP 4 — Verification is just recompute + constant-time compare
+======================================================================
+verifier recomputes HMAC over header.payload, compares to segment 3.
+Attacker without the secret cannot produce a matching segment 3.
+
+PyJWT decode with secret -&gt; {&#x27;sub&#x27;: &#x27;1234567890&#x27;, &#x27;name&#x27;: &#x27;Ada Lovelace&#x27;, &#x27;admin&#x27;: True}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_hmac_from_scratch.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">03 · HMAC from scratch — demystifying the HS256 signature</span>
+<span class="sd">==========================================================</span>
+
+<span class="sd">The big reveal: an HS256 JWT signature is *just* an HMAC-SHA256, base64url-</span>
+<span class="sd">encoded. Nothing magic. In this script we:</span>
+
+<span class="sd">1. Build an HS256 JWT with PyJWT.</span>
+<span class="sd">2. Split it into its three dot-separated segments: header.payload.signature.</span>
+<span class="sd">3. Independently compute HMAC-SHA256 over the ASCII bytes of</span>
+<span class="sd">   ``f&quot;{header}.{payload}&quot;`` using Python&#39;s ``hmac`` module + our secret.</span>
+<span class="sd">4. base64url-encode (no padding) our raw HMAC and show it is byte-for-byte</span>
+<span class="sd">   identical to the token&#39;s third segment.</span>
+
+<span class="sd">That equality is the whole trick behind HS256. The verifier recomputes the same</span>
+<span class="sd">HMAC and compares — an attacker without the secret cannot.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/03_hmac_from_scratch.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hmac</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_nopad</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;base64url-encode WITHOUT the trailing &#39;=&#39; padding (the JOSE convention).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64encode</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;=&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># 32+ bytes: RFC 7518 recommends an HMAC key at least as long as the digest.</span>
+    <span class="n">secret</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-keep-this-private-please&quot;</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;1234567890&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;Ada Lovelace&quot;</span><span class="p">,</span> <span class="s2">&quot;admin&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 — Let PyJWT mint an HS256 token&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token: </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">header_seg</span><span class="p">,</span> <span class="n">payload_seg</span><span class="p">,</span> <span class="n">signature_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;header    segment: </span><span class="si">{</span><span class="n">header_seg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;payload   segment: </span><span class="si">{</span><span class="n">payload_seg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;signature segment: </span><span class="si">{</span><span class="n">signature_seg</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 — Compute HMAC-SHA256 ourselves over &#39;header.payload&#39;&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">signing_input</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header_seg</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">payload_seg</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;signing input (bytes): </span><span class="si">{</span><span class="n">signing_input</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># This is EXACTLY what PyJWT&#39;s HS256 signer does internally.</span>
+    <span class="n">raw_hmac</span> <span class="o">=</span> <span class="n">hmac</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">secret</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">),</span> <span class="n">signing_input</span><span class="p">,</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">)</span><span class="o">.</span><span class="n">digest</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;raw HMAC-SHA256 (hex): </span><span class="si">{</span><span class="n">raw_hmac</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">our_signature</span> <span class="o">=</span> <span class="n">b64url_nopad</span><span class="p">(</span><span class="n">raw_hmac</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;our base64url signature: </span><span class="si">{</span><span class="n">our_signature</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3 — Compare against the token&#39;s signature segment&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;PyJWT signature : </span><span class="si">{</span><span class="n">signature_seg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;our  signature  : </span><span class="si">{</span><span class="n">our_signature</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">match</span> <span class="o">=</span> <span class="n">hmac</span><span class="o">.</span><span class="n">compare_digest</span><span class="p">(</span><span class="n">our_signature</span><span class="p">,</span> <span class="n">signature_seg</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">IDENTICAL? </span><span class="si">{</span><span class="n">match</span><span class="si">}</span><span class="s2">  &lt;-- the &#39;aha&#39;: HS256 signature == base64url(HMAC)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 4 — Verification is just recompute + constant-time compare&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># A verifier with the secret recomputes the HMAC and compares. Note we use</span>
+    <span class="c1"># hmac.compare_digest to avoid timing side-channels (never use ==).</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;verifier recomputes HMAC over header.payload, compares to segment 3.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Attacker without the secret cannot produce a matching segment 3.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Sanity: PyJWT verifies the same token with the same secret.</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">PyJWT decode with secret -&gt; </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/03_hmac_from_scratch.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_symmetric_vs_asymmetric">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Symmetric Vs Asymmetric</b><span>04_symmetric_vs_asymmetric.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>JWT signing algorithms split into two worlds:</p>
+<ul>
+<li>
+<p><strong>Symmetric (HMAC / HS256)</strong> — ONE secret is used to BOTH sign and verify.
+  Everyone who can verify can also forge. Great when issuer == verifier.</p>
+</li>
+<li>
+<p><strong>Asymmetric (RSA/ECDSA/EdDSA — RS256/ES256/EdDSA)</strong> — a PRIVATE key signs,
+  a PUBLIC key verifies. You can hand the public key to the whole world and they
+  can verify your tokens but can NEVER mint new ones. Essential for third-party
+  verification (e.g. Microsoft Entra ID publishes public keys via JWKS).</p>
+</li>
+</ul>
+<p>This script demonstrates both with PyJWT and prints a tradeoff table.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/04_symmetric_vs_asymmetric.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_symmetric_vs_asymmetric.py</span></div><pre>======================================================================
+SYMMETRIC (HS256) — same secret signs AND verifies
+======================================================================
+signed with secret : &#x27;the-one-shared-secret-at-least-32-bytes-long!!&#x27;
+token              : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhb...
+verified with SAME secret -&gt; {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+Anyone who can verify (has the secret) can also forge new tokens.
+
+======================================================================
+ASYMMETRIC (RS256) — private key signs, public key verifies
+======================================================================
+signed with PRIVATE key (kept secret by issuer)
+token              : eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhb...
+verified with PUBLIC key (shareable) -&gt; {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+public key tries to SIGN -&gt; rejected: AttributeError
+Public key verifies only; it can never mint tokens.
+
+======================================================================
+TRADEOFF TABLE
+======================================================================
+Property                Symmetric (HMAC)      Asymmetric (pubkey)
+----------------------------------------------------------------------
+Keys                    1 shared secret       private + public pair
+Who can sign            anyone with secret    only private-key holder
+Who can verify          anyone with secret    anyone with public key
+Distribute to verifiers secret (risky!)       public key (safe)
+Speed                   very fast             slower (big-number math)
+3rd-party verify        no (secret leaks)     yes (publish JWKS)
+Key size                32+ random bytes      2048-bit RSA / 256-bit EC
+JWT algs                HS256/384/512         RS*/ES*/PS*/EdDSA
+
+Rule of thumb: same service issues+verifies -&gt; HS256 is fine.
+Others must verify your tokens -&gt; use RS256/ES256/EdDSA + JWKS.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_symmetric_vs_asymmetric.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">04 · Symmetric vs. asymmetric — one shared secret vs. a key pair</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">JWT signing algorithms split into two worlds:</span>
+
+<span class="sd">* **Symmetric (HMAC / HS256)** — ONE secret is used to BOTH sign and verify.</span>
+<span class="sd">  Everyone who can verify can also forge. Great when issuer == verifier.</span>
+
+<span class="sd">* **Asymmetric (RSA/ECDSA/EdDSA — RS256/ES256/EdDSA)** — a PRIVATE key signs,</span>
+<span class="sd">  a PUBLIC key verifies. You can hand the public key to the whole world and they</span>
+<span class="sd">  can verify your tokens but can NEVER mint new ones. Essential for third-party</span>
+<span class="sd">  verification (e.g. Microsoft Entra ID publishes public keys via JWKS).</span>
+
+<span class="sd">This script demonstrates both with PyJWT and prints a tradeoff table.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/04_symmetric_vs_asymmetric.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_rsa_keypair</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate an RSA-2048 key pair, returned as PEM strings.&quot;&quot;&quot;</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">public_pem</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SYMMETRIC (HS256) — same secret signs AND verifies&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">shared_secret</span> <span class="o">=</span> <span class="s2">&quot;the-one-shared-secret-at-least-32-bytes-long!!&quot;</span>
+    <span class="n">sym_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;signed with secret : </span><span class="si">{</span><span class="n">shared_secret</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token              : </span><span class="si">{</span><span class="n">sym_token</span><span class="p">[:</span><span class="mi">50</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="n">sym_decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">sym_token</span><span class="p">,</span> <span class="n">shared_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;verified with SAME secret -&gt; </span><span class="si">{</span><span class="n">sym_decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Anyone who can verify (has the secret) can also forge new tokens.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ASYMMETRIC (RS256) — private key signs, public key verifies&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">private_pem</span><span class="p">,</span> <span class="n">public_pem</span> <span class="o">=</span> <span class="n">make_rsa_keypair</span><span class="p">()</span>
+    <span class="n">asym_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;signed with PRIVATE key (kept secret by issuer)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token              : </span><span class="si">{</span><span class="n">asym_token</span><span class="p">[:</span><span class="mi">50</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="n">asym_decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">asym_token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;verified with PUBLIC key (shareable) -&gt; </span><span class="si">{</span><span class="n">asym_decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Prove the public key CANNOT sign — the whole point of asymmetric crypto.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: public key was able to sign?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>  <span class="c1"># noqa: BLE001 - demonstrating the failure</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;public key tries to SIGN -&gt; rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">ex</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Public key verifies only; it can never mint tokens.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TRADEOFF TABLE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s2">&quot;Keys&quot;</span><span class="p">,</span> <span class="s2">&quot;1 shared secret&quot;</span><span class="p">,</span> <span class="s2">&quot;private + public pair&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;Who can sign&quot;</span><span class="p">,</span> <span class="s2">&quot;anyone with secret&quot;</span><span class="p">,</span> <span class="s2">&quot;only private-key holder&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;Who can verify&quot;</span><span class="p">,</span> <span class="s2">&quot;anyone with secret&quot;</span><span class="p">,</span> <span class="s2">&quot;anyone with public key&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;Distribute to verifiers&quot;</span><span class="p">,</span> <span class="s2">&quot;secret (risky!)&quot;</span><span class="p">,</span> <span class="s2">&quot;public key (safe)&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;Speed&quot;</span><span class="p">,</span> <span class="s2">&quot;very fast&quot;</span><span class="p">,</span> <span class="s2">&quot;slower (big-number math)&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;3rd-party verify&quot;</span><span class="p">,</span> <span class="s2">&quot;no (secret leaks)&quot;</span><span class="p">,</span> <span class="s2">&quot;yes (publish JWKS)&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;Key size&quot;</span><span class="p">,</span> <span class="s2">&quot;32+ random bytes&quot;</span><span class="p">,</span> <span class="s2">&quot;2048-bit RSA / 256-bit EC&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;JWT algs&quot;</span><span class="p">,</span> <span class="s2">&quot;HS256/384/512&quot;</span><span class="p">,</span> <span class="s2">&quot;RS*/ES*/PS*/EdDSA&quot;</span><span class="p">),</span>
+    <span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;Property&#39;</span><span class="si">:</span><span class="s2">&lt;24</span><span class="si">}{</span><span class="s1">&#39;Symmetric (HMAC)&#39;</span><span class="si">:</span><span class="s2">&lt;22</span><span class="si">}{</span><span class="s1">&#39;Asymmetric (pubkey)&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">prop</span><span class="p">,</span> <span class="n">sym</span><span class="p">,</span> <span class="n">asym</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">:</span><span class="s2">&lt;24</span><span class="si">}{</span><span class="n">sym</span><span class="si">:</span><span class="s2">&lt;22</span><span class="si">}{</span><span class="n">asym</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Rule of thumb: same service issues+verifies -&gt; HS256 is fine.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Others must verify your tokens -&gt; use RS256/ES256/EdDSA + JWKS.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/04_symmetric_vs_asymmetric.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_digital_signatures">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Digital Signatures</b><span>05_digital_signatures.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Before JWTs existed, there were digital signatures. RS256 is simply:</p>
+<div class="codehl"><pre><span></span><code>RSA signature over SHA-256(  base64url(header) + &quot;.&quot; + base64url(payload)  )
+</code></pre></div>
+
+<p>Here we strip JWT away entirely and use the <code>cryptography</code> library directly:</p>
+<ul>
+<li><strong>Sign</strong> a message with the RSA <em>private</em> key (PKCS#1 v1.5 padding + SHA-256).</li>
+<li><strong>Verify</strong> the signature with the RSA <em>public</em> key.</li>
+<li>Show that tampering with the message makes verification FAIL.</li>
+</ul>
+<p>Mantra: <strong>sign = private, verify = public.</strong> RS256 wraps exactly this in the
+JOSE format.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/05_digital_signatures.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_digital_signatures.py</span></div><pre>======================================================================
+STEP 1 — Generate an RSA key pair
+======================================================================
+private key: RSA-2048  (kept secret by the signer)
+public key : RSA-2048  (shareable with verifiers)
+
+======================================================================
+STEP 2 — SIGN with the PRIVATE key (PKCS#1 v1.5 + SHA-256)
+======================================================================
+message   : b&#x27;Transfer $50 from Alice to Bob&#x27;
+signature : 256 bytes (matches RSA key size: 2048/8 = 256)
+hex(first 32 bytes): 86467ad7ad1ebd01f292b77cf24285ff2d8f5d54afb057b2d7a38251564abf52...
+
+======================================================================
+STEP 3 — VERIFY with the PUBLIC key (genuine message)
+======================================================================
+verify(signature, original message) -&gt; VALID ✔
+
+======================================================================
+STEP 4 — Tamper with the message, verification must FAIL
+======================================================================
+tampered message: b&#x27;Transfer $5000 from Alice to Bob&#x27;
+verify(signature, tampered message) -&gt; INVALID ✔ (forgery caught)
+
+======================================================================
+STEP 5 — Same primitive, now as a JWT RS256 token
+======================================================================
+RS256 token : eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhbW91bnQiOjUwLC...
+RS256 decode: {&#x27;amount&#x27;: 50, &#x27;to&#x27;: &#x27;bob&#x27;}
+
+RS256 is just &#x27;RSA-sign the SHA-256 of header.payload&#x27;. Same engine.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_digital_signatures.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">05 · Digital signatures with raw RSA — the engine behind RS256</span>
+<span class="sd">===============================================================</span>
+
+<span class="sd">Before JWTs existed, there were digital signatures. RS256 is simply:</span>
+
+<span class="sd">    RSA signature over SHA-256(  base64url(header) + &quot;.&quot; + base64url(payload)  )</span>
+
+<span class="sd">Here we strip JWT away entirely and use the ``cryptography`` library directly:</span>
+
+<span class="sd">* **Sign** a message with the RSA *private* key (PKCS#1 v1.5 padding + SHA-256).</span>
+<span class="sd">* **Verify** the signature with the RSA *public* key.</span>
+<span class="sd">* Show that tampering with the message makes verification FAIL.</span>
+
+<span class="sd">Mantra: **sign = private, verify = public.** RS256 wraps exactly this in the</span>
+<span class="sd">JOSE format.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/05_digital_signatures.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignature</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">hashes</span><span class="p">,</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">padding</span><span class="p">,</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 — Generate an RSA key pair&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;private key: RSA-</span><span class="si">{</span><span class="n">private_key</span><span class="o">.</span><span class="n">key_size</span><span class="si">}</span><span class="s2">  (kept secret by the signer)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;public key : RSA-</span><span class="si">{</span><span class="n">public_key</span><span class="o">.</span><span class="n">key_size</span><span class="si">}</span><span class="s2">  (shareable with verifiers)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">message</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;Transfer $50 from Alice to Bob&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 — SIGN with the PRIVATE key (PKCS#1 v1.5 + SHA-256)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">signature</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">sign</span><span class="p">(</span>
+        <span class="n">message</span><span class="p">,</span>
+        <span class="n">padding</span><span class="o">.</span><span class="n">PKCS1v15</span><span class="p">(),</span>  <span class="c1"># the padding RS256 uses (PS256 uses PSS instead)</span>
+        <span class="n">hashes</span><span class="o">.</span><span class="n">SHA256</span><span class="p">(),</span>  <span class="c1"># the &#39;256&#39; in RS256</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;message   : </span><span class="si">{</span><span class="n">message</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;signature : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">signature</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes (matches RSA key size: 2048/8 = 256)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;hex(first 32 bytes): </span><span class="si">{</span><span class="n">signature</span><span class="p">[:</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">...</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3 — VERIFY with the PUBLIC key (genuine message)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">public_key</span><span class="o">.</span><span class="n">verify</span><span class="p">(</span><span class="n">signature</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">padding</span><span class="o">.</span><span class="n">PKCS1v15</span><span class="p">(),</span> <span class="n">hashes</span><span class="o">.</span><span class="n">SHA256</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;verify(signature, original message) -&gt; VALID ✔&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">InvalidSignature</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: genuine signature failed to verify&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 4 — Tamper with the message, verification must FAIL&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">tampered</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;Transfer $5000 from Alice to Bob&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;tampered message: </span><span class="si">{</span><span class="n">tampered</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">public_key</span><span class="o">.</span><span class="n">verify</span><span class="p">(</span><span class="n">signature</span><span class="p">,</span> <span class="n">tampered</span><span class="p">,</span> <span class="n">padding</span><span class="o">.</span><span class="n">PKCS1v15</span><span class="p">(),</span> <span class="n">hashes</span><span class="o">.</span><span class="n">SHA256</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: tampered message verified?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">InvalidSignature</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;verify(signature, tampered message) -&gt; INVALID ✔ (forgery caught)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 5 — Same primitive, now as a JWT RS256 token&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;amount&quot;</span><span class="p">:</span> <span class="mi">50</span><span class="p">,</span> <span class="s2">&quot;to&quot;</span><span class="p">:</span> <span class="s2">&quot;bob&quot;</span><span class="p">},</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RS256 token : </span><span class="si">{</span><span class="n">token</span><span class="p">[:</span><span class="mi">55</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RS256 decode: </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">RS256 is just &#39;RSA-sign the SHA-256 of header.payload&#39;. Same engine.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/05_digital_signatures.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_public_key_crypto_intuition">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Public Key Crypto Intuition</b><span>06_public_key_crypto_intuition.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Why is it <em>safe</em> to hand your public key to the entire internet?</p>
+<p>Because asymmetric crypto is built on <strong>trapdoor functions</strong>: math that is easy
+to compute one way but infeasible to reverse without a secret "trapdoor".</p>
+<ul>
+<li>
+<p><strong>RSA</strong> rests on <em>integer factorisation</em>. Multiplying two 1024-bit primes is
+  instant; factoring the 2048-bit product back into those primes is infeasible.
+  The public key reveals the product; the private key IS the factors.</p>
+</li>
+<li>
+<p><strong>ECDSA / EdDSA</strong> rest on the <em>elliptic-curve discrete log problem</em>. Computing
+  <code>Q = d · G</code> (a point multiplied by a scalar) is easy; recovering the scalar
+  <code>d</code> from <code>Q</code> and <code>G</code> is infeasible. The public key is the point <code>Q</code>;
+  the private key is the scalar <code>d</code>.</p>
+</li>
+</ul>
+<p>So a public key is a "padlock you can mass-produce": anyone can snap it shut
+(verify), only the trapdoor holder can have produced what fits (sign).</p>
+<p>This script keeps it conceptual + tiny demos.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/06_public_key_crypto_intuition.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_public_key_crypto_intuition.py</span></div><pre>======================================================================
+TRAPDOOR #1 — RSA &amp; integer factorisation (toy demo with small primes)
+======================================================================
+pick two primes p=61, q=53  (PRIVATE)
+publish their product n = p*q = 3233  (PUBLIC)
+easy forward : 61 * 53 = 3233
+hard reverse : given only n, find p and q.
+At 2048 bits, that reverse would take longer than the age of the
+universe on all computers on Earth — that&#x27;s the trapdoor.
+
+======================================================================
+TRAPDOOR #2 — Elliptic curves &amp; the discrete log problem
+======================================================================
+private key d : a random scalar (a big secret number)
+public  key Q : the curve point Q = d · G  (G is a fixed base point)
+easy forward  : multiply the point G by d to get Q
+hard reverse  : recover d from Q and G (elliptic-curve discrete log)
+
+======================================================================
+REAL KEYS — one-liners with the cryptography library
+======================================================================
+RSA-2048 public modulus n has 2048 bits
+RSA public exponent e = 65537
+
+ECDSA P-256 (ES256) public point:
+  x = 0xf0ba398de09d34456f456e0b3b6daa2c... (252 bits)
+  y = 0x2d952ba0214edd8497c8469486272ece... (254 bits)
+
+======================================================================
+RSA vs. ECDSA — same security, very different sizes
+======================================================================
+RSA-2048  ~ 112-bit security, ~256-byte signatures, ~294-byte pubkey
+EC P-256  ~ 128-bit security, ~64-byte  signatures, ~91-byte  pubkey
+EdDSA     ~ 128-bit security, 64-byte   signatures, deterministic
+
+Why publish the public key safely? Because reversing the trapdoor
+to recover the private key is computationally infeasible.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_public_key_crypto_intuition.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">06 · Public-key intuition — trapdoor functions &amp; why you can publish a key</span>
+<span class="sd">===========================================================================</span>
+
+<span class="sd">Why is it *safe* to hand your public key to the entire internet?</span>
+
+<span class="sd">Because asymmetric crypto is built on **trapdoor functions**: math that is easy</span>
+<span class="sd">to compute one way but infeasible to reverse without a secret &quot;trapdoor&quot;.</span>
+
+<span class="sd">* **RSA** rests on *integer factorisation*. Multiplying two 1024-bit primes is</span>
+<span class="sd">  instant; factoring the 2048-bit product back into those primes is infeasible.</span>
+<span class="sd">  The public key reveals the product; the private key IS the factors.</span>
+
+<span class="sd">* **ECDSA / EdDSA** rest on the *elliptic-curve discrete log problem*. Computing</span>
+<span class="sd">  ``Q = d · G`` (a point multiplied by a scalar) is easy; recovering the scalar</span>
+<span class="sd">  ``d`` from ``Q`` and ``G`` is infeasible. The public key is the point ``Q``;</span>
+<span class="sd">  the private key is the scalar ``d``.</span>
+
+<span class="sd">So a public key is a &quot;padlock you can mass-produce&quot;: anyone can snap it shut</span>
+<span class="sd">(verify), only the trapdoor holder can have produced what fits (sign).</span>
+
+<span class="sd">This script keeps it conceptual + tiny demos.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/06_public_key_crypto_intuition.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span><span class="p">,</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TRAPDOOR #1 — RSA &amp; integer factorisation (toy demo with small primes)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># Real RSA uses ~1024-bit primes; these tiny ones just illustrate the idea.</span>
+    <span class="n">p</span><span class="p">,</span> <span class="n">q</span> <span class="o">=</span> <span class="mi">61</span><span class="p">,</span> <span class="mi">53</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="n">p</span> <span class="o">*</span> <span class="n">q</span>  <span class="c1"># public-ish: easy to compute</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;pick two primes p=</span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2">, q=</span><span class="si">{</span><span class="n">q</span><span class="si">}</span><span class="s2">  (PRIVATE)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;publish their product n = p*q = </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">  (PUBLIC)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;easy forward : </span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2"> * </span><span class="si">{</span><span class="n">q</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;hard reverse : given only n, find p and q.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;At 2048 bits, that reverse would take longer than the age of the&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;universe on all computers on Earth — that&#39;s the trapdoor.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TRAPDOOR #2 — Elliptic curves &amp; the discrete log problem&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;private key d : a random scalar (a big secret number)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;public  key Q : the curve point Q = d · G  (G is a fixed base point)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;easy forward  : multiply the point G by d to get Q&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;hard reverse  : recover d from Q and G (elliptic-curve discrete log)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;REAL KEYS — one-liners with the cryptography library&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># RSA: factorisation-based.</span>
+    <span class="n">rsa_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">rsa_numbers</span> <span class="o">=</span> <span class="n">rsa_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_numbers</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RSA-2048 public modulus n has </span><span class="si">{</span><span class="n">rsa_numbers</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">bit_length</span><span class="p">()</span><span class="si">}</span><span class="s2"> bits&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;RSA public exponent e = </span><span class="si">{</span><span class="n">rsa_numbers</span><span class="o">.</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># ECDSA: discrete-log-based. P-256 is the curve behind ES256.</span>
+    <span class="n">ec_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+    <span class="n">ec_pub</span> <span class="o">=</span> <span class="n">ec_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_numbers</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">ECDSA P-256 (ES256) public point:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  x = </span><span class="si">{</span><span class="nb">hex</span><span class="p">(</span><span class="n">ec_pub</span><span class="o">.</span><span class="n">x</span><span class="p">)[:</span><span class="mi">34</span><span class="p">]</span><span class="si">}</span><span class="s2">... (</span><span class="si">{</span><span class="n">ec_pub</span><span class="o">.</span><span class="n">x</span><span class="o">.</span><span class="n">bit_length</span><span class="p">()</span><span class="si">}</span><span class="s2"> bits)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  y = </span><span class="si">{</span><span class="nb">hex</span><span class="p">(</span><span class="n">ec_pub</span><span class="o">.</span><span class="n">y</span><span class="p">)[:</span><span class="mi">34</span><span class="p">]</span><span class="si">}</span><span class="s2">... (</span><span class="si">{</span><span class="n">ec_pub</span><span class="o">.</span><span class="n">y</span><span class="o">.</span><span class="n">bit_length</span><span class="p">()</span><span class="si">}</span><span class="s2"> bits)&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RSA vs. ECDSA — same security, very different sizes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RSA-2048  ~ 112-bit security, ~256-byte signatures, ~294-byte pubkey&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;EC P-256  ~ 128-bit security, ~64-byte  signatures, ~91-byte  pubkey&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;EdDSA     ~ 128-bit security, 64-byte   signatures, deterministic&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Why publish the public key safely? Because reversing the trapdoor&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;to recover the private key is computationally infeasible.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/06_public_key_crypto_intuition.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_key_formats_pem_der_jwk">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Key Formats PEM DER JWK</b><span>07_key_formats_pem_der_jwk.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The same public key can be written in several encodings. Knowing them avoids a
+lot of "why won't this key load?" pain.</p>
+<ul>
+<li>
+<p><strong>PEM</strong> — base64 of the DER bytes, wrapped in <code>-----BEGIN PUBLIC KEY-----</code>
+  headers. ASCII, copy-paste friendly. What you usually see in <code>.pem</code> files,
+  env vars, and PyJWT examples.</p>
+</li>
+<li>
+<p><strong>DER</strong> — the raw binary ASN.1 encoding. PEM is literally DER + base64 + a
+  header. Used where binary is fine (TLS internals, some libraries).</p>
+</li>
+<li>
+<p><strong>JWK</strong> — "JSON Web Key": a JSON object describing the key
+  (<code>{"kty":"RSA","n":...,"e":...}</code>). This is what an OIDC provider's JWKS
+  endpoint serves, and what <code>PyJWKClient</code> parses. <code>n</code> and <code>e</code> are the same
+  RSA public numbers, base64url-encoded.</p>
+</li>
+</ul>
+<p>We take ONE RSA public key and emit all three.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/07_key_formats_pem_der_jwk.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_key_formats_pem_der_jwk.py</span></div><pre>======================================================================
+FORMAT 1 — PEM (base64 text with BEGIN/END headers)
+======================================================================
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs8zKLsKy+5CIRyeIYr9v
+Br54j42aaXz4k6kjao+fJ6LAfhB1FFkHQVJ5ijvGG3j2dUQgPaHNdE5/zLpYxE4Y
+b7Ih51g/LmDcp7vGPSUr1TLEA1O0EHu/N7jZc+aHq/k5pL4ekoMS9L8zy0klmQzB
+QvHgdUqX4ng13j1pDblsU2Hf/hX51cITaR6wAFQ0chWDSdLxl1dtsBMqhKHDJ6JV
+pkC8uXoRESv16BRgK1cAq/l/HI+jntHVS7VT4xqQBWM+SmfFPBpCTt5MMkRdo1p0
+EZAmMUSXH6c21/0Xn6WA+rsgoCP4kdON2o1Sns6P4AS9kt2K8e6+6+hYbGw9mTOe
+TQIDAQAB
+-----END PUBLIC KEY-----
+
+Used in: .pem files, env vars, most PyJWT key arguments.
+
+======================================================================
+FORMAT 2 — DER (raw binary ASN.1; shown as a hex preview)
+======================================================================
+DER length: 294 bytes
+DER hex preview: 30820122300d06092a864886f70d01010105000382010f003082010a0282010100b3ccca2ec2b2fb908847278862bf6f...
+PEM is exactly this DER, base64-encoded, with header/footer lines.
+
+======================================================================
+FORMAT 3 — JWK (JSON, what a JWKS endpoint serves)
+======================================================================
+{
+  &quot;kty&quot;: &quot;RSA&quot;,
+  &quot;key_ops&quot;: [
+    &quot;verify&quot;
+  ],
+  &quot;n&quot;: &quot;s8zKLsKy-5CIRyeIYr9vBr54j42aaXz4k6kjao-f...(truncated)&quot;,
+  &quot;e&quot;: &quot;AQAB&quot;
+}
+
+kty = RSA  (key type: RSA)
+e   = AQAB  (public exponent 65537 -&gt; &#x27;AQAB&#x27; in base64url)
+n   = the RSA modulus, base64url-encoded (342 chars)
+Used in: OIDC /jwks_uri responses, parsed by PyJWKClient/PyJWKSet.
+
+======================================================================
+ROUND-TRIP — JWK back into a usable public key
+======================================================================
+from_jwk(to_jwk(key)) yields the same public numbers? True
+This is precisely how JWKS-based verification rebuilds keys.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_key_formats_pem_der_jwk.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · Key formats — PEM, DER, and JWK for one RSA public key</span>
+<span class="sd">============================================================</span>
+
+<span class="sd">The same public key can be written in several encodings. Knowing them avoids a</span>
+<span class="sd">lot of &quot;why won&#39;t this key load?&quot; pain.</span>
+
+<span class="sd">* **PEM** — base64 of the DER bytes, wrapped in ``-----BEGIN PUBLIC KEY-----``</span>
+<span class="sd">  headers. ASCII, copy-paste friendly. What you usually see in ``.pem`` files,</span>
+<span class="sd">  env vars, and PyJWT examples.</span>
+
+<span class="sd">* **DER** — the raw binary ASN.1 encoding. PEM is literally DER + base64 + a</span>
+<span class="sd">  header. Used where binary is fine (TLS internals, some libraries).</span>
+
+<span class="sd">* **JWK** — &quot;JSON Web Key&quot;: a JSON object describing the key</span>
+<span class="sd">  (``{&quot;kty&quot;:&quot;RSA&quot;,&quot;n&quot;:...,&quot;e&quot;:...}``). This is what an OIDC provider&#39;s JWKS</span>
+<span class="sd">  endpoint serves, and what ``PyJWKClient`` parses. ``n`` and ``e`` are the same</span>
+<span class="sd">  RSA public numbers, base64url-encoded.</span>
+
+<span class="sd">We take ONE RSA public key and emit all three.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/07_key_formats_pem_der_jwk.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.algorithms</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSAAlgorithm</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># One key, three representations.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FORMAT 1 — PEM (base64 text with BEGIN/END headers)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">pem</span> <span class="o">=</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Used in: .pem files, env vars, most PyJWT key arguments.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FORMAT 2 — DER (raw binary ASN.1; shown as a hex preview)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">der</span> <span class="o">=</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">DER</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DER length: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">der</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DER hex preview: </span><span class="si">{</span><span class="n">der</span><span class="p">[:</span><span class="mi">48</span><span class="p">]</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PEM is exactly this DER, base64-encoded, with header/footer lines.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FORMAT 3 — JWK (JSON, what a JWKS endpoint serves)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># PyJWT can serialise a public key straight to a JWK string.</span>
+    <span class="n">jwk_str</span> <span class="o">=</span> <span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">to_jwk</span><span class="p">(</span><span class="n">public_key</span><span class="p">)</span>
+    <span class="n">jwk</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">jwk_str</span><span class="p">)</span>
+    <span class="n">pretty</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwk</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="c1"># n is long; truncate it for readable teaching output.</span>
+    <span class="k">if</span> <span class="s2">&quot;n&quot;</span> <span class="ow">in</span> <span class="n">jwk</span><span class="p">:</span>
+        <span class="n">jwk_preview</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">jwk</span><span class="p">)</span>
+        <span class="n">jwk_preview</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">jwk_preview</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">][:</span><span class="mi">40</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;...(truncated)&quot;</span>
+        <span class="n">pretty</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwk_preview</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">pretty</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">kty = </span><span class="si">{</span><span class="n">jwk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;kty&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">  (key type: RSA)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;e   = </span><span class="si">{</span><span class="n">jwk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;e&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">  (public exponent 65537 -&gt; &#39;AQAB&#39; in base64url)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n   = the RSA modulus, base64url-encoded (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">jwk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">))</span><span class="si">}</span><span class="s2"> chars)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Used in: OIDC /jwks_uri responses, parsed by PyJWKClient/PyJWKSet.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ROUND-TRIP — JWK back into a usable public key&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">reconstructed</span> <span class="o">=</span> <span class="n">RSAAlgorithm</span><span class="o">.</span><span class="n">from_jwk</span><span class="p">(</span><span class="n">jwk_str</span><span class="p">)</span>
+    <span class="n">same</span> <span class="o">=</span> <span class="n">reconstructed</span><span class="o">.</span><span class="n">public_numbers</span><span class="p">()</span> <span class="o">==</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_numbers</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;from_jwk(to_jwk(key)) yields the same public numbers? </span><span class="si">{</span><span class="n">same</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;This is precisely how JWKS-based verification rebuilds keys.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/07_key_formats_pem_der_jwk.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_algorithm_family_tour">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Algorithm Family Tour</b><span>08_algorithm_family_tour.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>PyJWT supports five families of signing algorithms. This script signs the SAME
+payload with one representative from each, then prints a comparison table of the
+header <code>alg</code> and the resulting signature length.</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Example</th>
+<th>Key type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HMAC</td>
+<td>HS256</td>
+<td>shared secret</td>
+<td>symmetric, fast</td>
+</tr>
+<tr>
+<td>RSA</td>
+<td>RS256</td>
+<td>RSA private/public</td>
+<td>PKCS#1 v1.5 padding</td>
+</tr>
+<tr>
+<td>ECDSA</td>
+<td>ES256</td>
+<td>EC P-256 keypair</td>
+<td>small signatures</td>
+</tr>
+<tr>
+<td>RSA-PSS</td>
+<td>PS256</td>
+<td>RSA private/public</td>
+<td>randomised (PSS) padding</td>
+</tr>
+<tr>
+<td>EdDSA</td>
+<td>EdDSA</td>
+<td>Ed25519 keypair</td>
+<td>modern, deterministic</td>
+</tr>
+</tbody>
+</table>
+<p>Note: ECDSA and RSA-PSS are <em>randomised</em>, so their signatures differ run to run
+even for identical input — that is expected and secure.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/13-cryptography-deep-dive/08_algorithm_family_tour.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_algorithm_family_tour.py</span></div><pre>==============================================================================
+SIGNING THE SAME PAYLOAD WITH ONE ALGORITHM PER FAMILY
+==============================================================================
+payload: {&#x27;sub&#x27;: &#x27;grand-tour&#x27;, &#x27;iss&#x27;: &#x27;pyjwt-course&#x27;}
+
+Family    alg     header.alg  sig bytes  verify?
+------------------------------------------------------------------------------
+HMAC      HS256   HS256       32         yes
+RSA       RS256   RS256       256        yes
+ECDSA     ES256   ES256       64         yes
+RSA-PSS   PS256   PS256       256        yes
+EdDSA     EdDSA   EdDSA       64         yes
+
+==============================================================================
+TAKEAWAYS
+==============================================================================
+- The header &#x27;alg&#x27; always names the algorithm used to sign.
+- HMAC/RSA/PSS digests vary in size; EC &amp; EdDSA are compact.
+- ES256 &amp; PS256 are randomised: re-running yields a different sig.
+- Choose: HS* (internal), RS*/PS* (RSA infra), ES*/EdDSA (small+fast).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_algorithm_family_tour.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · The algorithm family grand tour — one alg from each family</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">PyJWT supports five families of signing algorithms. This script signs the SAME</span>
+<span class="sd">payload with one representative from each, then prints a comparison table of the</span>
+<span class="sd">header ``alg`` and the resulting signature length.</span>
+
+<span class="sd">| Family   | Example | Key type            | Notes                          |</span>
+<span class="sd">|----------|---------|---------------------|--------------------------------|</span>
+<span class="sd">| HMAC     | HS256   | shared secret       | symmetric, fast                |</span>
+<span class="sd">| RSA      | RS256   | RSA private/public  | PKCS#1 v1.5 padding            |</span>
+<span class="sd">| ECDSA    | ES256   | EC P-256 keypair    | small signatures               |</span>
+<span class="sd">| RSA-PSS  | PS256   | RSA private/public  | randomised (PSS) padding       |</span>
+<span class="sd">| EdDSA    | EdDSA   | Ed25519 keypair     | modern, deterministic          |</span>
+
+<span class="sd">Note: ECDSA and RSA-PSS are *randomised*, so their signatures differ run to run</span>
+<span class="sd">even for identical input — that is expected and secure.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/13-cryptography-deep-dive/08_algorithm_family_tour.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span><span class="p">,</span> <span class="n">ed25519</span><span class="p">,</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pem_pair</span><span class="p">(</span><span class="n">private_key</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Serialise any asymmetric private key to (private_pem, public_pem).&quot;&quot;&quot;</span>
+    <span class="n">priv</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="n">pub</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">priv</span><span class="p">,</span> <span class="n">pub</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sig_len</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode the base64url signature segment and return its raw byte length.&quot;&quot;&quot;</span>
+    <span class="n">sig_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">padding</span> <span class="o">=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">sig_seg</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">sig_seg</span> <span class="o">+</span> <span class="n">padding</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;grand-tour&quot;</span><span class="p">,</span> <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;pyjwt-course&quot;</span><span class="p">}</span>
+
+    <span class="c1"># Build a (sign_key, verify_key) for one alg in each family.</span>
+    <span class="n">rsa_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">rsa_priv</span><span class="p">,</span> <span class="n">rsa_pub</span> <span class="o">=</span> <span class="n">pem_pair</span><span class="p">(</span><span class="n">rsa_key</span><span class="p">)</span>
+
+    <span class="n">ec_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>  <span class="c1"># P-256 -&gt; ES256</span>
+    <span class="n">ec_priv</span><span class="p">,</span> <span class="n">ec_pub</span> <span class="o">=</span> <span class="n">pem_pair</span><span class="p">(</span><span class="n">ec_key</span><span class="p">)</span>
+
+    <span class="n">ed_key</span> <span class="o">=</span> <span class="n">ed25519</span><span class="o">.</span><span class="n">Ed25519PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>  <span class="c1"># -&gt; EdDSA</span>
+    <span class="n">ed_priv</span><span class="p">,</span> <span class="n">ed_pub</span> <span class="o">=</span> <span class="n">pem_pair</span><span class="p">(</span><span class="n">ed_key</span><span class="p">)</span>
+
+    <span class="n">families</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s2">&quot;HMAC&quot;</span><span class="p">,</span> <span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="s2">&quot;shared-secret-key-at-least-32-bytes-long!&quot;</span><span class="p">,</span> <span class="s2">&quot;shared-secret-key-at-least-32-bytes-long!&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;RSA&quot;</span><span class="p">,</span> <span class="s2">&quot;RS256&quot;</span><span class="p">,</span> <span class="n">rsa_priv</span><span class="p">,</span> <span class="n">rsa_pub</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;ECDSA&quot;</span><span class="p">,</span> <span class="s2">&quot;ES256&quot;</span><span class="p">,</span> <span class="n">ec_priv</span><span class="p">,</span> <span class="n">ec_pub</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;RSA-PSS&quot;</span><span class="p">,</span> <span class="s2">&quot;PS256&quot;</span><span class="p">,</span> <span class="n">rsa_priv</span><span class="p">,</span> <span class="n">rsa_pub</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">,</span> <span class="s2">&quot;EdDSA&quot;</span><span class="p">,</span> <span class="n">ed_priv</span><span class="p">,</span> <span class="n">ed_pub</span><span class="p">),</span>
+    <span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SIGNING THE SAME PAYLOAD WITH ONE ALGORITHM PER FAMILY&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;payload: </span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">header</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;Family&#39;</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}{</span><span class="s1">&#39;alg&#39;</span><span class="si">:</span><span class="s2">&lt;8</span><span class="si">}{</span><span class="s1">&#39;header.alg&#39;</span><span class="si">:</span><span class="s2">&lt;12</span><span class="si">}{</span><span class="s1">&#39;sig bytes&#39;</span><span class="si">:</span><span class="s2">&lt;11</span><span class="si">}{</span><span class="s1">&#39;verify?&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">header</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">family</span><span class="p">,</span> <span class="n">alg</span><span class="p">,</span> <span class="n">sign_key</span><span class="p">,</span> <span class="n">verify_key</span> <span class="ow">in</span> <span class="n">families</span><span class="p">:</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">sign_key</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="n">alg</span><span class="p">)</span>
+
+        <span class="c1"># Read the alg straight out of the (unverified) JOSE header.</span>
+        <span class="n">header_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">header_seg</span> <span class="o">+=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">header_seg</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="n">hdr</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">header_seg</span><span class="p">))</span>
+        <span class="n">header_alg</span> <span class="o">=</span> <span class="n">hdr</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">]</span>
+
+        <span class="c1"># Verify it round-trips with the matching key.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">verify_key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="n">alg</span><span class="p">])</span>
+            <span class="n">verified</span> <span class="o">=</span> <span class="s2">&quot;yes&quot;</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">ex</span><span class="p">:</span>  <span class="c1"># noqa: BLE001</span>
+            <span class="n">verified</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;no (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">ex</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">family</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}{</span><span class="n">alg</span><span class="si">:</span><span class="s2">&lt;8</span><span class="si">}{</span><span class="n">header_alg</span><span class="si">:</span><span class="s2">&lt;12</span><span class="si">}{</span><span class="n">sig_len</span><span class="p">(</span><span class="n">token</span><span class="p">)</span><span class="si">:</span><span class="s2">&lt;11</span><span class="si">}{</span><span class="n">verified</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TAKEAWAYS&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- The header &#39;alg&#39; always names the algorithm used to sign.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- HMAC/RSA/PSS digests vary in size; EC &amp; EdDSA are compact.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- ES256 &amp; PS256 are randomised: re-running yields a different sig.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Choose: HS* (internal), RS*/PS* (RSA infra), ES*/EdDSA (small+fast).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/13-cryptography-deep-dive/08_algorithm_family_tour.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="12-validation-errors-and-leeway.html"><div class="dir">← Previous</div><div class="ttl">12 · Module 12 · Validation, Errors &amp; Leeway</div></a><a class="next" href="14-security-best-practices.html"><div class="dir">Next →</div><div class="ttl">14 · Module 14 · Security Best Practices</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

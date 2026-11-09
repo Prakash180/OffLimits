@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 09 · EdDSA Algorithms (Ed25519 / Ed448) · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html" class="active"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>09 · Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#22d3ee,#0ea5e9)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#22d3ee;border-color:#22d3ee55;background:#22d3ee11">Module 09</span>
+  <h1 style="margin-top:18px">Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>EdDSA is built on <strong>twisted Edwards curves</strong> — a reformulation of elliptic curves whose addition formula is <em>complete</em> (it works for every pair of points with no awkward special cases). That mathematical tidiness is what makes EdDSA so hard to misuse: there are far fewer edge cases where an implementation can leak secrets. The two flavours are <strong>Ed25519</strong> (Curve25519, ~128-bit security, a tiny <strong>32-byte</strong> public key, 64-byte signature) and <strong>Ed448</strong> (Curve448, ~224-bit security, 57-byte key, 114-byte signature). Both are fast because they avoid the big-integer modular inversions that slow RSA and classic ECDSA.</p>
+<p>The defining trick is <strong>deterministic nonces</strong>. Recall ECDSA's fatal dependence on a fresh random <code>k</code> per signature (Module 07) — reuse it and your private key spills out. EdDSA eliminates that risk entirely: instead of drawing <code>k</code> from a random number generator, it <strong>derives <code>k</code> by hashing the private key together with the message</strong>. No RNG is consulted at signing time. Sign the same message twice and you get the <strong>byte-for-byte identical signature</strong> — and crucially, two <em>different</em> messages can never accidentally collide on the same nonce. An entire category of catastrophic real-world failures (the Sony PS3 break, various wallet key leaks) simply cannot happen.</p>
+<p>In the JWT world there's one quirk to internalize: <strong>both flavours share a single <code>alg</code> value, <code>"EdDSA"</code></strong>. There is no <code>"Ed25519"</code> or <code>"Ed448"</code> algorithm string in the JOSE header. You always pass <code>algorithm="EdDSA"</code> to <code>jwt.encode</code>, and the <strong>key object itself</strong> — whether it's an <code>Ed25519PrivateKey</code> or an <code>Ed448PrivateKey</code> — silently determines which curve is used. The curve is a property of the key, not the header.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    A[&quot;jwt.encode(payload, key, algorithm=&#x27;EdDSA&#x27;)&quot;] --&gt; B{Key type?}
+    B --&gt;|Ed25519PrivateKey| C[Ed25519 signature, 64 bytes]
+    B --&gt;|Ed448PrivateKey| D[Ed448 signature, 114 bytes]
+    C --&gt; E[&quot;Header alg = &#x27;EdDSA&#x27; either way&quot;]
+    D --&gt; E</div></div>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Think of a <strong>tamper-evident notary stamp whose ink is mixed from the document's own text</strong>. Because the ink recipe is computed deterministically from what's being stamped, the same document always produces the same imprint — and there's no separate ink bottle (random nonce) that could be refilled wrong, run dry, or get reused on the next document. One predictable, self-contained process, every time.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>Ed25519PrivateKey.generate()</code> produces a compact 32-byte secret scalar and its 32-byte public point.</li>
+<li>The keys serialize to PEM (PKCS#8 / SubjectPublicKeyInfo) so PyJWT can take the bytes directly.</li>
+<li><code>jwt.encode(payload, private_pem, algorithm="EdDSA")</code> hashes the <strong>private key + message</strong> to derive the nonce deterministically — no RNG involved.</li>
+<li>It computes the signature and stamps <code>{"alg": "EdDSA", "typ": "JWT"}</code> into the header — note the curve is <em>not</em> recorded there.</li>
+<li>Signing the identical payload again derives the <strong>same</strong> nonce, yielding an identical token, byte-for-byte.</li>
+<li><code>jwt.decode(token, public_pem, algorithms=["EdDSA"])</code> verifies against the public point and returns the claims.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>03_eddsa_is_deterministic.py</code>, two signings print <strong>"Tokens identical? True"</strong> — the opposite of Module 08's PSS, and no RNG was touched.</li>
+<li>In <code>01_ed25519_sign_verify.py</code>, the JOSE header reads <code>"alg": "EdDSA"</code> — never <code>"Ed25519"</code>, even though the key is Ed25519.</li>
+<li>In <code>04_eddsa_key_sizes.py</code>, the raw Ed25519 public key is just <strong>32 bytes</strong> — a fraction of RSA-2048's 256-byte modulus.</li>
+<li>In <code>05_eddsa_vs_ecdsa.py</code>, EdDSA and ECDSA sit side by side: EdDSA needs no sign-time randomness, ECDSA does.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"The alg should be <code>Ed25519</code>."</strong> It's always <code>"EdDSA"</code>; passing <code>algorithm="Ed25519"</code> fails. The key picks the curve.</li>
+<li><strong>"Deterministic signatures are insecure."</strong> The opposite — determinism removes ECDSA's nonce-reuse vulnerability entirely.</li>
+<li><strong>"Identical tokens for identical input is a bug."</strong> It's correct, intended behaviour — don't try to "fix" it.</li>
+<li><strong>"You still need <code>algorithms=[...]</code> only for RSA/ECDSA."</strong> Pin <code>algorithms=["EdDSA"]</code> at decode time too — the whitelist matters for every scheme.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-09-eddsa-algorithms-ed25519-ed448">🟣 Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</h1>
+<blockquote>
+<p>The modern default. <strong>Tiny keys, blazing speed, deterministic by design, and
+hard to misuse.</strong> If you're choosing a signature scheme for a new system in
+2025+, this is usually the right answer.</p>
+</blockquote>
+<hr />
+<h2 id="what-is-eddsa">🧠 What is EdDSA?</h2>
+<p>EdDSA (Edwards-curve Digital Signature Algorithm) is an elliptic-curve scheme
+built on <strong>twisted Edwards curves</strong>. It comes in two flavours:</p>
+<table>
+<thead>
+<tr>
+<th>Flavour</th>
+<th>Curve</th>
+<th>Security</th>
+<th>Public key</th>
+<th>Signature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Ed25519</strong></td>
+<td>Curve25519</td>
+<td>~128-bit</td>
+<td><strong>32 bytes</strong></td>
+<td>64 bytes</td>
+</tr>
+<tr>
+<td><strong>Ed448</strong></td>
+<td>Curve448</td>
+<td>~224-bit</td>
+<td>57 bytes</td>
+<td>114 bytes</td>
+</tr>
+</tbody>
+</table>
+<h3 id="one-algorithm-string-for-both-eddsa">⚠️ One algorithm string for both: <code>"EdDSA"</code></h3>
+<p>This is the EdDSA gotcha. In JWT, <strong>both</strong> Ed25519 and Ed448 use the <strong>same</strong>
+JOSE header value:</p>
+<div class="codehl"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;alg&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;EdDSA&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;typ&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;JWT&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>There is no <code>"Ed25519"</code> or <code>"Ed448"</code> alg value. The <strong>key type itself</strong> (the
+curve baked into the key object) determines which curve is used. You always pass
+<code>algorithm="EdDSA"</code> to <code>jwt.encode()</code>.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    A[&quot;jwt.encode(payload, key, algorithm=&#x27;EdDSA&#x27;)&quot;] --&gt; B{Key type?}
+    B --&gt;|Ed25519 key| C[Ed25519 signature]
+    B --&gt;|Ed448 key| D[Ed448 signature]
+    C --&gt; E[&quot;Header alg = &#x27;EdDSA&#x27; either way&quot;]
+    D --&gt; E</div></div>
+<hr />
+<h2 id="why-eddsa-wins">✨ Why EdDSA wins</h2>
+<ul>
+<li><strong>Deterministic.</strong> No random nonce at signing time — signing the same message
+  twice gives the <em>identical</em> signature. This kills an entire class of ECDSA
+  disasters where a bad/repeated nonce leaks the private key (e.g. the Sony PS3
+  break).</li>
+<li><strong>Fast.</strong> No big-integer math, no modular inversion — among the fastest schemes
+  to both sign and verify.</li>
+<li><strong>Tiny.</strong> A 32-byte Ed25519 public key vs a 256-byte RSA-2048 modulus.</li>
+<li><strong>Misuse-resistant.</strong> The curve and parameters are fixed; far fewer footguns.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>ECDSA (<code>ES*</code>)</th>
+<th>EdDSA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RNG at sign time</td>
+<td><strong>Required</strong></td>
+<td>Not needed</td>
+</tr>
+<tr>
+<td>Misuse risk</td>
+<td>Bad nonce → key leak</td>
+<td>Resistant by design</td>
+</tr>
+<tr>
+<td>Curve selection</td>
+<td>Algorithm fixes curve</td>
+<td>Key type fixes curve</td>
+</tr>
+<tr>
+<td>JWT <code>alg</code> value</td>
+<td><code>ES256</code>/<code>ES384</code>/<code>ES512</code>/<code>ES256K</code></td>
+<td><code>EdDSA</code> (both)</td>
+</tr>
+<tr>
+<td>Determinism</td>
+<td>No</td>
+<td><strong>Yes</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_ed25519_sign_verify"><code>01_ed25519_sign_verify.py</code></a></td>
+<td>Generate Ed25519, sign/verify (<code>alg=EdDSA</code>)</td>
+<td><code>.venv/bin/python pyjwt-course/09-eddsa-algorithms/01_ed25519_sign_verify.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_ed448_sign_verify"><code>02_ed448_sign_verify.py</code></a></td>
+<td>Generate Ed448, sign/verify (<code>alg=EdDSA</code>)</td>
+<td><code>.venv/bin/python pyjwt-course/09-eddsa-algorithms/02_ed448_sign_verify.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_eddsa_is_deterministic"><code>03_eddsa_is_deterministic.py</code></a></td>
+<td>Same payload twice → identical tokens</td>
+<td><code>.venv/bin/python pyjwt-course/09-eddsa-algorithms/03_eddsa_is_deterministic.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_eddsa_key_sizes"><code>04_eddsa_key_sizes.py</code></a></td>
+<td>32-byte raw key; vs EC &amp; RSA PEM sizes</td>
+<td><code>.venv/bin/python pyjwt-course/09-eddsa-algorithms/04_eddsa_key_sizes.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_eddsa_vs_ecdsa"><code>05_eddsa_vs_ecdsa.py</code></a></td>
+<td>EdDSA vs ECDSA, working side-by-side demo</td>
+<td><code>.venv/bin/python pyjwt-course/09-eddsa-algorithms/05_eddsa_vs_ecdsa.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run them all:</p>
+<div class="codehl"><pre><span></span><code><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/09-eddsa-algorithms/0*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>Don't look for an <code>"Ed25519"</code> alg.</strong> The header always says <code>"EdDSA"</code>; the
+  curve is implied by the key. Passing <code>algorithm="Ed25519"</code> will fail.</li>
+<li><strong>Pin <code>algorithms=["EdDSA"]</code></strong> at decode time like every other scheme.</li>
+<li><strong>Ed448 ≠ Ed25519 keys.</strong> A token signed with an Ed25519 key must be verified
+  with the matching Ed25519 public key (and vice versa for Ed448).</li>
+<li><strong>Determinism is intended.</strong> Identical tokens for identical input is correct
+  behaviour, not a bug — don't "fix" it.</li>
+</ul>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ul>
+<li>EdDSA = <strong>deterministic, fast, tiny-keyed, misuse-resistant</strong> signatures.</li>
+<li><strong>One alg string, <code>"EdDSA"</code></strong>, covers both Ed25519 and Ed448; the key picks
+  the curve.</li>
+<li>It removes ECDSA's dangerous dependence on a per-signature secure RNG.</li>
+<li>For most <strong>new</strong> services, EdDSA (Ed25519) is the recommended default.</li>
+</ul>
+<p>➡️ <strong>Back to:</strong> <a href="#">Course curriculum map</a></p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 5 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_ed25519_sign_verify" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>ED25519 Sign Verify</b><span>01_ed25519_sign_verify.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><strong>EdDSA</strong> (Edwards-curve Digital Signature Algorithm) is the newest signature
+family in the JWT world and, for most new systems, the best default. It comes
+in two flavours defined by their curve:</p>
+<div class="codehl"><pre><span></span><code>Ed25519  — built on Curve25519,  ~128-bit security, 32-byte keys
+Ed448    — built on Curve448,    ~224-bit security, 57-byte keys
+</code></pre></div>
+
+<p>⚠️  In JWT, BOTH flavours use the SAME algorithm string: <strong>"EdDSA"</strong>.
+There is no "Ed25519" alg value in the JOSE header — the header just says
+<code>"alg": "EdDSA"</code>, and the <em>key type</em> (the curve baked into the key) determines
+whether Ed25519 or Ed448 is actually used.</p>
+<p>This script generates an Ed25519 keypair and does a round-trip.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_ed25519_sign_verify.py</span></div><pre>======================================================================
+EdDSA / Ed25519 token:
+eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImN1cnZlIjoiRWQyNTUxOSJ9.Rr4C-_1pH3PtS_t9h1dyT2taRsYIxZeVBwVd22yEAHnvahI4JQgdmDbGv7c0mchF81EPBabNrHJCmQusPjSWDA
+======================================================================
+
+JOSE header: {&#x27;alg&#x27;: &#x27;EdDSA&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}  &lt;- note alg is &#x27;EdDSA&#x27;, not &#x27;Ed25519&#x27;
+Verified payload: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;curve&#x27;: &#x27;Ed25519&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_ed25519_sign_verify.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">09 · EdDSA · 01 — Ed25519 sign &amp; verify</span>
+<span class="sd">=======================================</span>
+
+<span class="sd">**EdDSA** (Edwards-curve Digital Signature Algorithm) is the newest signature</span>
+<span class="sd">family in the JWT world and, for most new systems, the best default. It comes</span>
+<span class="sd">in two flavours defined by their curve:</span>
+
+<span class="sd">    Ed25519  — built on Curve25519,  ~128-bit security, 32-byte keys</span>
+<span class="sd">    Ed448    — built on Curve448,    ~224-bit security, 57-byte keys</span>
+
+<span class="sd">⚠️  In JWT, BOTH flavours use the SAME algorithm string: **&quot;EdDSA&quot;**.</span>
+<span class="sd">There is no &quot;Ed25519&quot; alg value in the JOSE header — the header just says</span>
+<span class="sd">`&quot;alg&quot;: &quot;EdDSA&quot;`, and the *key type* (the curve baked into the key) determines</span>
+<span class="sd">whether Ed25519 or Ed448 is actually used.</span>
+
+<span class="sd">This script generates an Ed25519 keypair and does a round-trip.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric.ed25519</span><span class="w"> </span><span class="kn">import</span> <span class="n">Ed25519PrivateKey</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Ed25519 keys take no parameters — the curve is fixed by definition.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">Ed25519PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;curve&quot;</span><span class="p">:</span> <span class="s2">&quot;Ed25519&quot;</span><span class="p">}</span>
+
+    <span class="c1"># Sign with algorithm=&quot;EdDSA&quot; — note the header alg will be &quot;EdDSA&quot;.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;EdDSA / Ed25519 token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">,</span> <span class="s2">&quot; &lt;- note alg is &#39;EdDSA&#39;, not &#39;Ed25519&#39;&quot;</span><span class="p">)</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/09-eddsa-algorithms/01_ed25519_sign_verify.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_ed448_sign_verify">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>ED448 Sign Verify</b><span>02_ed448_sign_verify.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Ed448 is the higher-security sibling of Ed25519:</p>
+<div class="codehl"><pre><span></span><code>Ed448  — Curve448, ~224-bit security, 57-byte public keys, 114-byte sigs
+</code></pre></div>
+
+<p>You'd reach for Ed448 when you want a comfortable security margin beyond the
+~128-bit level of Ed25519 (think very-long-lived signatures). It is slower and
+produces larger signatures, but is still far more compact than RSA.</p>
+<p>Just like Ed25519, the JWT algorithm string is <strong>"EdDSA"</strong> — the <em>key</em> (an
+Ed448 key here) decides the underlying curve.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_ed448_sign_verify.py</span></div><pre>EdDSA / Ed448 token:
+eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IiLCJjdXJ2ZSI6IkVkNDQ4In0.eYPDRzg_oPN9eUWJnwTH15E_qdMD_IVcx-oSd3jceboqv8K43z-eDrP_Var1w5sQtWowP5lkDCcAXLGYZI05e6i3QWKJOTclSQXtbmXvsQULqfwdwuWK0pfT3N_ho76N2FL4nlkoxfZXO2NnDSP6LAwA
+
+JOSE header: {&#x27;alg&#x27;: &#x27;EdDSA&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;bob&#x27;, &#x27;curve&#x27;: &#x27;Ed448&#x27;}
+
+Signature segment length (base64url chars): 152
+(Larger than Ed25519&#x27;s, but still tiny next to RSA.)</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_ed448_sign_verify.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">09 · EdDSA · 02 — Ed448 sign &amp; verify</span>
+<span class="sd">=====================================</span>
+
+<span class="sd">Ed448 is the higher-security sibling of Ed25519:</span>
+
+<span class="sd">    Ed448  — Curve448, ~224-bit security, 57-byte public keys, 114-byte sigs</span>
+
+<span class="sd">You&#39;d reach for Ed448 when you want a comfortable security margin beyond the</span>
+<span class="sd">~128-bit level of Ed25519 (think very-long-lived signatures). It is slower and</span>
+<span class="sd">produces larger signatures, but is still far more compact than RSA.</span>
+
+<span class="sd">Just like Ed25519, the JWT algorithm string is **&quot;EdDSA&quot;** — the *key* (an</span>
+<span class="sd">Ed448 key here) decides the underlying curve.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric.ed448</span><span class="w"> </span><span class="kn">import</span> <span class="n">Ed448PrivateKey</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">Ed448PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;bob&quot;</span><span class="p">,</span> <span class="s2">&quot;curve&quot;</span><span class="p">:</span> <span class="s2">&quot;Ed448&quot;</span><span class="p">}</span>
+
+    <span class="c1"># Same &quot;EdDSA&quot; alg string as Ed25519 — the key type makes it Ed448.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;EdDSA / Ed448 token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">))</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Signature segment length (base64url chars):&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;(Larger than Ed25519&#39;s, but still tiny next to RSA.)&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/09-eddsa-algorithms/02_ed448_sign_verify.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_eddsa_is_deterministic">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>EdDSA Is Deterministic</b><span>03_eddsa_is_deterministic.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A defining property of EdDSA: signing is <strong>deterministic</strong>. The per-signature
+"nonce" is derived deterministically from the private key and the message
+(via a hash), so there is <em>no</em> reliance on an external random number generator
+at signing time.</p>
+<p>Consequences:
+    - Signing the SAME payload twice with the SAME Ed25519 key produces the
+      EXACT SAME token, byte-for-byte.
+    - This sidesteps a whole class of catastrophic ECDSA failures, where a
+      bad/repeated random nonce can leak the private key (famously, the 2010
+      Sony PS3 ECDSA break).</p>
+<p>Contrast:
+    - ECDSA (ES256 etc.)  -&gt; needs a fresh secure random nonce per signature.
+    - RSASSA-PSS (PS256)  -&gt; randomised (random salt) -&gt; tokens differ.
+    - EdDSA               -&gt; deterministic -&gt; tokens identical.</p>
+<p>We sign the same payload twice with Ed25519 and show the tokens match.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_eddsa_is_deterministic.py</span></div><pre>======================================================================
+Ed25519 — sign identical payload twice
+======================================================================
+token A: eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.F7XZ0C8F0b5j1eMCBaBn1c0l0CIxqJEw5LK5_cmw7rv0TUFcgtgQwvC_PaRcG82r1EDCwTweQHelGi9GWEPaBw
+token B: eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.F7XZ0C8F0b5j1eMCBaBn1c0l0CIxqJEw5LK5_cmw7rv0TUFcgtgQwvC_PaRcG82r1EDCwTweQHelGi9GWEPaBw
+
+Tokens identical?  True  &lt;- expect True (deterministic)
+Both verify correctly. ✔
+
+Determinism removes the &#x27;must have good RNG at sign time&#x27; footgun
+that plagues classic ECDSA.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_eddsa_is_deterministic.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">09 · EdDSA · 03 — EdDSA is DETERMINISTIC</span>
+<span class="sd">========================================</span>
+
+<span class="sd">A defining property of EdDSA: signing is **deterministic**. The per-signature</span>
+<span class="sd">&quot;nonce&quot; is derived deterministically from the private key and the message</span>
+<span class="sd">(via a hash), so there is *no* reliance on an external random number generator</span>
+<span class="sd">at signing time.</span>
+
+<span class="sd">Consequences:</span>
+<span class="sd">    - Signing the SAME payload twice with the SAME Ed25519 key produces the</span>
+<span class="sd">      EXACT SAME token, byte-for-byte.</span>
+<span class="sd">    - This sidesteps a whole class of catastrophic ECDSA failures, where a</span>
+<span class="sd">      bad/repeated random nonce can leak the private key (famously, the 2010</span>
+<span class="sd">      Sony PS3 ECDSA break).</span>
+
+<span class="sd">Contrast:</span>
+<span class="sd">    - ECDSA (ES256 etc.)  -&gt; needs a fresh secure random nonce per signature.</span>
+<span class="sd">    - RSASSA-PSS (PS256)  -&gt; randomised (random salt) -&gt; tokens differ.</span>
+<span class="sd">    - EdDSA               -&gt; deterministic -&gt; tokens identical.</span>
+
+<span class="sd">We sign the same payload twice with Ed25519 and show the tokens match.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric.ed25519</span><span class="w"> </span><span class="kn">import</span> <span class="n">Ed25519PrivateKey</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">Ed25519PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;carol&quot;</span><span class="p">,</span> <span class="s2">&quot;msg&quot;</span><span class="p">:</span> <span class="s2">&quot;sign me twice&quot;</span><span class="p">}</span>
+
+    <span class="n">token_a</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">)</span>
+    <span class="n">token_b</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Ed25519 — sign identical payload twice&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token A:&quot;</span><span class="p">,</span> <span class="n">token_a</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token B:&quot;</span><span class="p">,</span> <span class="n">token_b</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Tokens identical? &quot;</span><span class="p">,</span> <span class="n">token_a</span> <span class="o">==</span> <span class="n">token_b</span><span class="p">,</span> <span class="s2">&quot; &lt;- expect True (deterministic)&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Both verify, of course.</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_a</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">])</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_b</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Both verify correctly. ✔&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Determinism removes the &#39;must have good RNG at sign time&#39; footgun&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;that plagues classic ECDSA.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/09-eddsa-algorithms/03_eddsa_is_deterministic.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_eddsa_key_sizes">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>EdDSA Key Sizes</b><span>04_eddsa_key_sizes.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>EdDSA keys are astonishingly small. An Ed25519 <strong>public key is just 32 raw
+bytes</strong> — the actual point on Curve25519. Compare that with a 2048-bit RSA
+public key (256-byte modulus) or even a P-256 EC key.</p>
+<p>This script prints:
+    - the raw (Encoding.Raw) Ed25519 public key and its length (32 bytes)
+    - the PEM-wrapped Ed25519 public key (slightly larger due to ASN.1 framing)
+    - a side-by-side size comparison against EC P-256 and RSA-2048 PEMs</p>
+<p>Small keys + deterministic signing + no big-integer math = EdDSA is also one of
+the <strong>fastest</strong> signature schemes, which is why it's popular for high-volume
+token issuance and constrained devices.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_eddsa_key_sizes.py</span></div><pre>======================================================================
+Ed25519 PUBLIC KEY
+======================================================================
+Raw bytes length: 32 bytes  (the bare curve point)
+Raw bytes (hex) : 260fb564126903cb59197e89f423317c538dd948559b0a63676beb5dbf27c10f
+
+PEM form:
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAJg+1ZBJpA8tZGX6J9CMxfFON2UhVmwpjZ2vrXb8nwQ8=
+-----END PUBLIC KEY-----
+
+======================================================================
+PUBLIC-KEY PEM SIZE COMPARISON
+======================================================================
+  Ed25519  :   113 bytes  (raw key only 32 bytes!)
+  EC P-256 :   178 bytes
+  RSA-2048 :   451 bytes
+
+EdDSA: smallest keys, fastest signing, hard to misuse.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_eddsa_key_sizes.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">09 · EdDSA · 04 — EdDSA key sizes: tiny and fast</span>
+<span class="sd">================================================</span>
+
+<span class="sd">EdDSA keys are astonishingly small. An Ed25519 **public key is just 32 raw</span>
+<span class="sd">bytes** — the actual point on Curve25519. Compare that with a 2048-bit RSA</span>
+<span class="sd">public key (256-byte modulus) or even a P-256 EC key.</span>
+
+<span class="sd">This script prints:</span>
+<span class="sd">    - the raw (Encoding.Raw) Ed25519 public key and its length (32 bytes)</span>
+<span class="sd">    - the PEM-wrapped Ed25519 public key (slightly larger due to ASN.1 framing)</span>
+<span class="sd">    - a side-by-side size comparison against EC P-256 and RSA-2048 PEMs</span>
+
+<span class="sd">Small keys + deterministic signing + no big-integer math = EdDSA is also one of</span>
+<span class="sd">the **fastest** signature schemes, which is why it&#39;s popular for high-volume</span>
+<span class="sd">token issuance and constrained devices.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span><span class="p">,</span> <span class="n">rsa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric.ed25519</span><span class="w"> </span><span class="kn">import</span> <span class="n">Ed25519PrivateKey</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">ed_key</span> <span class="o">=</span> <span class="n">Ed25519PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">()</span>
+    <span class="n">ed_pub</span> <span class="o">=</span> <span class="n">ed_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="c1"># RAW encoding gives the bare 32-byte public key point.</span>
+    <span class="n">ed_pub_raw</span> <span class="o">=</span> <span class="n">ed_pub</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">Raw</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">Raw</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">ed_pub_pem</span> <span class="o">=</span> <span class="n">ed_pub</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Ed25519 PUBLIC KEY&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Raw bytes length:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">ed_pub_raw</span><span class="p">),</span> <span class="s2">&quot;bytes  (the bare curve point)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Raw bytes (hex) :&quot;</span><span class="p">,</span> <span class="n">ed_pub_raw</span><span class="o">.</span><span class="n">hex</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">PEM form:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">ed_pub_pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+
+    <span class="c1"># --- size comparison against EC P-256 and RSA-2048 (PEM public keys) ---</span>
+    <span class="n">ec_pub_pem</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+        <span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">rsa_pub_pem</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+        <span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PUBLIC-KEY PEM SIZE COMPARISON&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Ed25519  : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">ed_pub_pem</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> bytes  (raw key only 32 bytes!)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  EC P-256 : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">ec_pub_pem</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  RSA-2048 : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rsa_pub_pem</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">EdDSA: smallest keys, fastest signing, hard to misuse.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/09-eddsa-algorithms/04_eddsa_key_sizes.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_eddsa_vs_ecdsa">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>EdDSA Vs ECDSA</b><span>05_eddsa_vs_ecdsa.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>EdDSA and ECDSA are both elliptic-curve signature schemes, but they differ in
+ways that matter for real systems:</p>
+<p>┌────────────────────┬───────────────────────────┬──────────────────────────┐
+  │                    │ ECDSA (ES256, ES384, …)    │ EdDSA (Ed25519/Ed448)    │
+  ├────────────────────┼───────────────────────────┼──────────────────────────┤
+  │ Randomness at sign │ REQUIRES secure RNG nonce  │ Deterministic (no RNG)   │
+  │ Misuse risk        │ Bad nonce -&gt; key leak      │ Resistant by design      │
+  │ Curve choice       │ alg fixes the curve        │ curve fixed by key type  │
+  │ JWT alg string     │ ES256 / ES384 / ES512 / …  │ "EdDSA" (both flavours)  │
+  │ Speed              │ Fast                       │ Typically faster         │
+  │ Determinism        │ No (randomised)            │ Yes                      │
+  └────────────────────┴───────────────────────────┴──────────────────────────┘</p>
+<p>The big practical win for EdDSA: removing the random-nonce requirement
+eliminates an entire category of devastating implementation bugs.</p>
+<p>This script signs &amp; verifies a token with BOTH schemes so you can see them
+working back to back.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_eddsa_vs_ecdsa.py</span></div><pre>ECDSA  (ES256, needs secure RNG per signature):
+  header : {&#x27;alg&#x27;: &#x27;ES256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+  token  : eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYXZlIn0.9-WCFPXhgZ4U10AKGx0qhVWaxfFwS0OtcrjeIvBPPUB-kezWZdSDFhulySwGpH2lq8VwVjS5rkDccJ6YvkyP_g
+  verify : {&#x27;sub&#x27;: &#x27;dave&#x27;}
+
+EdDSA  (Ed25519, deterministic, misuse-resistant):
+  header : {&#x27;alg&#x27;: &#x27;EdDSA&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+  token  : eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYXZlIn0.bkydcyPo-6KjGHBLPyShh9gVDYsfIRnjBFKcvvwuYsDyd5n_bU6rJ4lcPoDYiZCM3Je7dBdfbwAIDTAcTs4fDg
+  verify : {&#x27;sub&#x27;: &#x27;dave&#x27;}
+
+Both are elliptic-curve schemes; EdDSA removes the RNG footgun and
+uses one alg string (&#x27;EdDSA&#x27;) regardless of curve.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_eddsa_vs_ecdsa.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">09 · EdDSA · 05 — EdDSA vs ECDSA, head to head</span>
+<span class="sd">==============================================</span>
+
+<span class="sd">EdDSA and ECDSA are both elliptic-curve signature schemes, but they differ in</span>
+<span class="sd">ways that matter for real systems:</span>
+
+<span class="sd">  ┌────────────────────┬───────────────────────────┬──────────────────────────┐</span>
+<span class="sd">  │                    │ ECDSA (ES256, ES384, …)    │ EdDSA (Ed25519/Ed448)    │</span>
+<span class="sd">  ├────────────────────┼───────────────────────────┼──────────────────────────┤</span>
+<span class="sd">  │ Randomness at sign │ REQUIRES secure RNG nonce  │ Deterministic (no RNG)   │</span>
+<span class="sd">  │ Misuse risk        │ Bad nonce -&gt; key leak      │ Resistant by design      │</span>
+<span class="sd">  │ Curve choice       │ alg fixes the curve        │ curve fixed by key type  │</span>
+<span class="sd">  │ JWT alg string     │ ES256 / ES384 / ES512 / …  │ &quot;EdDSA&quot; (both flavours)  │</span>
+<span class="sd">  │ Speed              │ Fast                       │ Typically faster         │</span>
+<span class="sd">  │ Determinism        │ No (randomised)            │ Yes                      │</span>
+<span class="sd">  └────────────────────┴───────────────────────────┴──────────────────────────┘</span>
+
+<span class="sd">The big practical win for EdDSA: removing the random-nonce requirement</span>
+<span class="sd">eliminates an entire category of devastating implementation bugs.</span>
+
+<span class="sd">This script signs &amp; verifies a token with BOTH schemes so you can see them</span>
+<span class="sd">working back to back.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric.ed25519</span><span class="w"> </span><span class="kn">import</span> <span class="n">Ed25519PrivateKey</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pem_pair_from</span><span class="p">(</span><span class="n">private_key</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]:</span>
+    <span class="n">priv</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">pub</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">priv</span><span class="p">,</span> <span class="n">pub</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;dave&quot;</span><span class="p">}</span>
+
+    <span class="c1"># --- ECDSA (ES256 on P-256) ---</span>
+    <span class="n">es_priv</span><span class="p">,</span> <span class="n">es_pub</span> <span class="o">=</span> <span class="n">pem_pair_from</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">()))</span>
+    <span class="n">es_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">es_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES256&quot;</span><span class="p">)</span>
+    <span class="n">es_decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">es_token</span><span class="p">,</span> <span class="n">es_pub</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES256&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ECDSA  (ES256, needs secure RNG per signature):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  header :&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">es_token</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  token  :&quot;</span><span class="p">,</span> <span class="n">es_token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  verify :&quot;</span><span class="p">,</span> <span class="n">es_decoded</span><span class="p">)</span>
+
+    <span class="c1"># --- EdDSA (Ed25519) ---</span>
+    <span class="n">ed_priv</span><span class="p">,</span> <span class="n">ed_pub</span> <span class="o">=</span> <span class="n">pem_pair_from</span><span class="p">(</span><span class="n">Ed25519PrivateKey</span><span class="o">.</span><span class="n">generate</span><span class="p">())</span>
+    <span class="n">ed_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">ed_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">)</span>
+    <span class="n">ed_decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ed_token</span><span class="p">,</span> <span class="n">ed_pub</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;EdDSA&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">EdDSA  (Ed25519, deterministic, misuse-resistant):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  header :&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">ed_token</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  token  :&quot;</span><span class="p">,</span> <span class="n">ed_token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  verify :&quot;</span><span class="p">,</span> <span class="n">ed_decoded</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Both are elliptic-curve schemes; EdDSA removes the RNG footgun and&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;uses one alg string (&#39;EdDSA&#39;) regardless of curve.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/09-eddsa-algorithms/05_eddsa_vs_ecdsa.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="08-rsa-pss-algorithms.html"><div class="dir">← Previous</div><div class="ttl">08 · Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</div></a><a class="next" href="10-headers-and-kid.html"><div class="dir">Next →</div><div class="ttl">10 · Module 10 · Headers &amp; kid</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

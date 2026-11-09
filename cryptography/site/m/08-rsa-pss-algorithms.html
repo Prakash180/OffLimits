@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512) · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html" class="active"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>08 · Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#a3e635,#65a30d)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#a3e635;border-color:#a3e63555;background:#a3e63511">Module 08</span>
+  <h1 style="margin-top:18px">Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>RSA-PSS uses the <strong>exact same RSA key pair and the same trapdoor</strong> as Module 06 — the only thing that changes is the <strong>padding</strong> applied to the hash before the private-key transform. Where <code>RS*</code> uses the rigid, deterministic PKCS#1 v1.5 template, <code>PS*</code> uses <strong>RSASSA-PSS</strong> (Probabilistic Signature Scheme). PSS folds in a freshly generated <strong>random salt</strong> on every signature, runs it through a mask-generation function (MGF1) to spread the bits across the whole padded block, and only then applies the trapdoor. That single design choice has a stronger, cleaner security proof — which is why PSS is the <em>recommended</em> padding for new RSA signatures.</p>
+<p>The headline behavioural consequence is that <strong>PSS is probabilistic</strong>. Sign the identical payload twice with the identical key and you get <strong>two different tokens</strong>, because each one carries a different random salt baked into its signature. This feels alarming the first time you see it, but both tokens verify perfectly — the salt is recovered and checked as part of verification. Contrast this with <code>RS256</code>, which is deterministic: same input, byte-for-byte identical token every time.</p>
+<p>Because only the padding differs, <strong>one RSA-2048 key pair serves every variant</strong>: <code>RS256/384/512</code> <em>and</em> <code>PS256/384/512</code>, all three hash sizes, from the same key. The hash is independent of the key size (unlike ECDSA, where the algorithm fixes the curve). But the algorithm string is still a hard security boundary at verification time: a <code>PS256</code> token will <strong>not</strong> validate if your verifier only allows <code>["RS256"]</code>, even with the correct key — PyJWT raises <code>InvalidAlgorithmError</code>. The padding scheme is part of the contract, so you must pin the exact algorithms you expect.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    K[One RSA-2048 keypair] --&gt; H[SHA-256 digest of header.payload]
+    H --&gt; S[Add fresh random salt]
+    S --&gt; M[MGF1 mask -&gt; PSS-encoded block]
+    M --&gt; T[Private-key trapdoor]
+    T --&gt; Sig[Signature - differs every run]
+    Sig --&gt; V[Public key verifies and recovers salt]</div></div>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>It's like signing a contract with <strong>invisible-ink confetti sprinkled on top each time</strong>. The signature underneath is yours, but the random sparkle pattern is different on every copy. A verifier holding your reference card can still confirm the signature is genuine <em>and</em> that the confetti was applied correctly — yet no two signed copies ever look identical, which makes certain forgery and replay tricks far harder.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>rsa.generate_private_key(...)</code> creates one ordinary RSA-2048 key pair — nothing PSS-specific yet.</li>
+<li><code>jwt.encode(payload, private_pem, algorithm="PS256")</code> SHA-256-hashes the signing input.</li>
+<li>PSS generates a <strong>random salt</strong>, runs MGF1 to build the padded block, and applies the private-key trapdoor — producing signature <em>A</em>.</li>
+<li>Calling <code>jwt.encode</code> again with the same payload draws a <strong>new</strong> salt, producing signature <em>B</em> ≠ <em>A</em>.</li>
+<li><code>jwt.decode(..., algorithms=["PS256"])</code> uses the public key to undo the trapdoor, recovers the salt, and confirms the PSS encoding is valid for the recomputed digest.</li>
+<li>Both <em>A</em> and <em>B</em> verify; the same key also produces valid <code>RS256</code> tokens, which <em>are</em> identical run-to-run.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>03_pss_is_probabilistic.py</code>, two <code>PS256</code> calls print <strong>"Tokens identical? False"</strong> while two <code>RS256</code> calls print <strong>"True"</strong> — the probabilistic-vs-deterministic split, live.</li>
+<li>Both differing PS256 tokens still pass <code>jwt.decode</code> — randomness is a <em>feature</em>, not corruption.</li>
+<li>In <code>05_same_key_both_schemes.py</code>, the <strong>same key</strong> signs both PS256 and RS256; mixing them at verify time raises <code>InvalidAlgorithmError</code>.</li>
+<li>In <code>02_ps384_ps512.py</code>, one RSA key yields PS384 and PS512 — the hash is free to vary without touching the key.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"PS* needs a special RSA key."</strong> No — it's the same key as RS*. Only the padding inside the signature differs.</li>
+<li><strong>"A changing token means something is broken."</strong> PSS <em>intends</em> to change every time. Don't cache or deduplicate by token string.</li>
+<li><strong>"If the key matches, any RSA algorithm verifies."</strong> The <code>algorithms=[...]</code> whitelist is enforced; PS256 ≠ RS256 even with one key.</li>
+<li><strong>"Probabilistic means less reliable."</strong> The randomness strengthens the security proof; verification remains deterministic and exact.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-08-rsa-pss-algorithms-ps256-ps384-ps512">🔵 Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</h1>
+<blockquote>
+<p>Same RSA keys you already know — but with <strong>modern, probabilistic padding</strong>.
+Meet the <code>PS*</code> family: the cryptographically preferred way to do RSA
+signatures in JWTs.</p>
+</blockquote>
+<hr />
+<h2 id="pss-vs-pkcs1-v15-the-one-idea-that-matters">🧠 PSS vs PKCS#1 v1.5 — the one idea that matters</h2>
+<p>RSA signing has <strong>two</strong> padding schemes, and the JWT algorithm name tells you
+which one is in play:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Padding scheme</th>
+<th>Behaviour</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RS256/384/512</code></td>
+<td>PKCS#1 v1.5 (1993)</td>
+<td><strong>Deterministic</strong></td>
+<td>Legacy, ubiquitous</td>
+</tr>
+<tr>
+<td><code>PS256/384/512</code></td>
+<td><strong>RSASSA-PSS</strong></td>
+<td><strong>Probabilistic</strong> (random salt)</td>
+<td>Modern, recommended</td>
+</tr>
+</tbody>
+</table>
+<p>Both use the <strong>same RSA keypair</strong>. The only difference is the encoding/padding
+step inside the signature. PSS has a stronger security proof and injects a
+random salt on every signature, which is why it's the recommendation for new
+systems.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    K[One RSA-2048 keypair] --&gt; R[RS* · PKCS#1 v1.5]
+    K --&gt; P[PS* · RSASSA-PSS]
+    R --&gt; RD[Deterministic: same input → same token]
+    P --&gt; PD[Probabilistic: same input → different token each time]
+    RD --&gt; V[Both verify with the public key]
+    PD --&gt; V</div></div>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Padding</th>
+<th>Hash</th>
+<th>Min key</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PS256</code></td>
+<td>RSASSA-PSS</td>
+<td>SHA-256</td>
+<td>RSA-2048</td>
+</tr>
+<tr>
+<td><code>PS384</code></td>
+<td>RSASSA-PSS</td>
+<td>SHA-384</td>
+<td>RSA-2048</td>
+</tr>
+<tr>
+<td><code>PS512</code></td>
+<td>RSASSA-PSS</td>
+<td>SHA-512</td>
+<td>RSA-2048</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>🔁 Unlike ECDSA, the <strong>hash is independent of the key size</strong> — one RSA key can
+produce PS256, PS384 and PS512 signatures.</p>
+</blockquote>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_ps256"><code>01_ps256.py</code></a></td>
+<td>Generate RSA-2048, sign/verify with <strong>PS256</strong></td>
+<td><code>.venv/bin/python pyjwt-course/08-rsa-pss-algorithms/01_ps256.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_ps384_ps512"><code>02_ps384_ps512.py</code></a></td>
+<td>One key → <strong>PS384</strong> and <strong>PS512</strong></td>
+<td><code>.venv/bin/python pyjwt-course/08-rsa-pss-algorithms/02_ps384_ps512.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_pss_is_probabilistic"><code>03_pss_is_probabilistic.py</code></a></td>
+<td>PS256 tokens differ; RS256 tokens identical</td>
+<td><code>.venv/bin/python pyjwt-course/08-rsa-pss-algorithms/03_pss_is_probabilistic.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_pss_vs_pkcs1"><code>04_pss_vs_pkcs1.py</code></a></td>
+<td>Side-by-side PS<em> vs RS</em> explanation + demo</td>
+<td><code>.venv/bin/python pyjwt-course/08-rsa-pss-algorithms/04_pss_vs_pkcs1.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_same_key_both_schemes"><code>05_same_key_both_schemes.py</code></a></td>
+<td>One key, both schemes; PS256 ≠ RS256 at verify</td>
+<td><code>.venv/bin/python pyjwt-course/08-rsa-pss-algorithms/05_same_key_both_schemes.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run them all:</p>
+<div class="codehl"><pre><span></span><code><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/08-rsa-pss-algorithms/0*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="the-probabilistic-demo-script-03">🔬 The probabilistic demo (script 03)</h2>
+<p>Sign the <strong>identical</strong> payload twice:</p>
+<div class="codehl"><pre><span></span><code>PS256 → token A ≠ token B   (random salt each time)
+RS256 → token A = token B   (deterministic)
+</code></pre></div>
+
+<p>Both PS256 tokens still verify perfectly. The randomness is a <strong>feature</strong>, not
+corruption — it's what makes PSS provably secure.</p>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>The verifier's <code>algorithms=[...]</code> is a security boundary.</strong> A PS256 token
+  will <strong>not</strong> verify if you only allow <code>["RS256"]</code> — even with the same key —
+  raising <code>InvalidAlgorithmError</code> (script 05). Pin the algorithms you expect.</li>
+<li><strong>Don't assume tokens are stable.</strong> If you cache or deduplicate by token
+  string, remember PS* tokens change every signing call.</li>
+<li><strong>RSA-2048 is the floor.</strong> Use 2048-bit minimum; 3072-bit for higher
+  assurance.</li>
+<li><strong>PS<em> ⊄ RS</em> interop.</strong> Older verifiers may not understand PSS — keep RS256 for
+  legacy interoperability, choose PS* for new designs.</li>
+</ul>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ul>
+<li><code>PS*</code> = RSA + <strong>RSASSA-PSS</strong> padding; <code>RS*</code> = RSA + <strong>PKCS#1 v1.5</strong> padding.</li>
+<li>PSS is <strong>probabilistic</strong> (random salt) → identical inputs yield different
+  tokens; PKCS#1 v1.5 is <strong>deterministic</strong>.</li>
+<li>The <strong>same RSA keypair</strong> works for both families and all three hash sizes.</li>
+<li>Prefer <strong>PS256/384/512 for new systems</strong>; keep RS* only for compatibility.</li>
+</ul>
+<p>➡️ <strong>Next:</strong> <a href="09-eddsa-algorithms.html">Module 09 · EdDSA</a> — the modern,
+deterministic, misuse-resistant default.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 5 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_ps256" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>PS256</b><span>01_ps256.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The <strong>PS</strong> family (PS256, PS384, PS512) is RSA signing using the modern
+<strong>RSASSA-PSS</strong> padding scheme ("Probabilistic Signature Scheme").</p>
+<div class="codehl"><pre><span></span><code>PS256 = RSA + PSS padding + SHA-256
+</code></pre></div>
+
+<p>It uses the <em>same</em> RSA keypair you'd use for RS256 — the only difference is the
+padding/encoding step inside the signature. PSS is the cryptographically
+preferred padding for new systems (RS* uses the older PKCS#1 v1.5 padding).</p>
+<p>This script generates a fresh RSA-2048 keypair and does a PS256 round-trip.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_ps256.py</span></div><pre>======================================================================
+PS256 token (RSA + PSS padding + SHA-256):
+eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInNjaGVtZSI6IlJTQVNTQS1QU1MifQ.kNgolRrq3xpNb9YAzAX4XA27RDRs-Jof8lIonMf6UjyRMsi9MmnDQveP_hm_sF8FzSdyUsQG5CJwqmL2Hgn8yQ-9Vd8cFtYzgEK4dJdEEaQtJAMuyZYWXpZAy3-0i0gBlVSJdWHxD5urDX3YxILZ8TUTO-MeUrC-t5Bom42hl4v7Q24krypA0wgpC-A9m0DVgmh_XdfUt35uRCOshOHmifP61ldbX2zu4NijKf4j1B83MB7hq0TCnUfiyJ_-G3vPvVW3_9x4_6aFKrniT7cvCBucPT9RzSXp_KdZ_wFhk_neDEMhVXYSyQmsfutKBPrix4LPI62gP7ndR8m1CA_EcQ
+======================================================================
+
+JOSE header: {&#x27;alg&#x27;: &#x27;PS256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;scheme&#x27;: &#x27;RSASSA-PSS&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_ps256.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · RSA-PSS · 01 — Signing &amp; verifying with PS256</span>
+<span class="sd">==================================================</span>
+
+<span class="sd">The **PS** family (PS256, PS384, PS512) is RSA signing using the modern</span>
+<span class="sd">**RSASSA-PSS** padding scheme (&quot;Probabilistic Signature Scheme&quot;).</span>
+
+<span class="sd">    PS256 = RSA + PSS padding + SHA-256</span>
+
+<span class="sd">It uses the *same* RSA keypair you&#39;d use for RS256 — the only difference is the</span>
+<span class="sd">padding/encoding step inside the signature. PSS is the cryptographically</span>
+<span class="sd">preferred padding for new systems (RS* uses the older PKCS#1 v1.5 padding).</span>
+
+<span class="sd">This script generates a fresh RSA-2048 keypair and does a PS256 round-trip.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># RSA-2048 is the practical minimum modern size. PSS works with any RSA key.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;scheme&quot;</span><span class="p">:</span> <span class="s2">&quot;RSASSA-PSS&quot;</span><span class="p">}</span>
+
+    <span class="c1"># SIGN with the private key using PS256.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;PS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PS256 token (RSA + PSS padding + SHA-256):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">))</span>  <span class="c1"># alg == &#39;PS256&#39;</span>
+
+    <span class="c1"># VERIFY with the public key.</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;PS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/08-rsa-pss-algorithms/01_ps256.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_ps384_ps512">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>PS384 PS512</b><span>02_ps384_ps512.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Just like PS256, the larger PSS variants pair RSA + PSS padding with a bigger
+SHA-2 hash:</p>
+<div class="codehl"><pre><span></span><code>PS384 = RSA + PSS + SHA-384
+PS512 = RSA + PSS + SHA-512
+</code></pre></div>
+
+<p>Crucially — unlike ECDSA, where the algorithm dictates the curve — <strong>the RSA
+key size is independent of the hash</strong>. The <em>same</em> RSA-2048 key can produce
+PS256, PS384, and PS512 signatures. You pick the hash strength via the
+algorithm string; the key stays the same.</p>
+<p>This script signs the same payload with both PS384 and PS512 using one key.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_ps384_ps512.py</span></div><pre>======================================================================
+PS384  (same RSA-2048 key, hash = SHA-384)
+======================================================================
+Header  : {&#x27;alg&#x27;: &#x27;PS384&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Token   : eyJhbGciOiJQUzM4NCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IifQ.gGXWbrvRlW0TLGJVN0urYOEBM9IoaXNXU_U7F59WmQImBPlLc_tAHLVaJNX4QMlZDjs5bBldQD7LpmaGU7hufJhl2X-X9yTxWtesNY1o_kifq1Dzu10h0wE2kbl7mIgkiz3hvbEFbv-RxttM4Rbpid7fjlWPIPgQB26SN5IY8e3ewC5CCpp27AtR3mddEUbF5Vymq5pwHpu3SBpzlEPsjucG2b74hj8xAuXwa_g_fklxrEisaBjHX2tAuqCPfYBOzbfuLbyh7MFH9p3XVv6cysoHbjHS-mDMGOndWhmDQi9M6sIr14HOC3WFLSfVJIKwoN6tdvTlVTKJ6Z9Ft7A_2A
+Verified: {&#x27;sub&#x27;: &#x27;bob&#x27;}
+
+======================================================================
+PS512  (same RSA-2048 key, hash = SHA-512)
+======================================================================
+Header  : {&#x27;alg&#x27;: &#x27;PS512&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Token   : eyJhbGciOiJQUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IifQ.WmTe408NpWcNy1nzNgAxAhS6A3R-KYlqOyzb3zkdkywD13QuKzlGZUrJ36L9tINbbHwC1OH9F7MMR8Q4lxnVDZ_RAA2BQkVHS8ZoyHa1VD6HcUfoY4urURBIvNg7XiBzQ_lsEKjeYa3Z0pgU3eqGtAjcCgSic93xl1YjHLU3RyCqaChGB74qpEqcB3OV_OUTIKUHTTkAsLDVJDXlD_bwapqw0SjiYDtSi0ysbLsdZ1heMqVrYpdXa_9NLDU7SjWtn7rP2jSbNOZxMdErWcGWzulL7xqQc5oSAC_ZId47lZlZtTpsnP3H-buTHBOJjMcuTSDgFwwKbflXdPJli7QTMQ
+Verified: {&#x27;sub&#x27;: &#x27;bob&#x27;}
+
+One key, three hash strengths — the RSA key size is independent
+of the chosen SHA-2 variant.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_ps384_ps512.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · RSA-PSS · 02 — PS384 and PS512</span>
+<span class="sd">===================================</span>
+
+<span class="sd">Just like PS256, the larger PSS variants pair RSA + PSS padding with a bigger</span>
+<span class="sd">SHA-2 hash:</span>
+
+<span class="sd">    PS384 = RSA + PSS + SHA-384</span>
+<span class="sd">    PS512 = RSA + PSS + SHA-512</span>
+
+<span class="sd">Crucially — unlike ECDSA, where the algorithm dictates the curve — **the RSA</span>
+<span class="sd">key size is independent of the hash**. The *same* RSA-2048 key can produce</span>
+<span class="sd">PS256, PS384, and PS512 signatures. You pick the hash strength via the</span>
+<span class="sd">algorithm string; the key stays the same.</span>
+
+<span class="sd">This script signs the same payload with both PS384 and PS512 using one key.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;bob&quot;</span><span class="p">}</span>
+
+    <span class="k">for</span> <span class="n">alg</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;PS384&quot;</span><span class="p">,</span> <span class="s2">&quot;PS512&quot;</span><span class="p">):</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="n">alg</span><span class="p">)</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+        <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="n">alg</span><span class="p">])</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">alg</span><span class="si">}</span><span class="s2">  (same RSA-2048 key, hash = SHA-</span><span class="si">{</span><span class="n">alg</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Header  :&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token   :&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;One key, three hash strengths — the RSA key size is independent&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;of the chosen SHA-2 variant.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/08-rsa-pss-algorithms/02_ps384_ps512.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_pss_is_probabilistic">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>PSS Is Probabilistic</b><span>03_pss_is_probabilistic.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>This is the defining behavioural difference between the two RSA schemes:</p>
+<div class="codehl"><pre><span></span><code>PS256 (RSASSA-PSS)        -&gt; randomised: signing injects a random *salt*,
+                              so signing the SAME payload twice yields TWO
+                              DIFFERENT tokens.
+
+RS256 (RSASSA-PKCS1-v1.5) -&gt; deterministic: signing the SAME payload twice
+                              with the SAME key yields the SAME token,
+                              byte-for-byte.
+</code></pre></div>
+
+<p>Both are perfectly valid and both verify correctly. The randomness in PSS is a
+security feature (it strengthens the proof of security and resists certain
+attacks), not a bug.</p>
+<p>We sign the identical payload twice with each scheme and compare.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_pss_is_probabilistic.py</span></div><pre>======================================================================
+PS256 — sign identical payload twice
+======================================================================
+token A: eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.CKHUaNd3E-p8mR3yrREZ99ZyEBn2PXKp_Q7ilk09cqo542XWfdRgnJHEzsxzrUuoTQWit_zNSR0L_-v6EL8tS05cC_z9eoe95vgSIRRWrxDxL9irkE1FIYW2TiEbLO_eG952NlRTZpffi_l-CDEgbNyAlImCbcoNbnqEOg32Hkok6CykMhw4P_yvbWD63OHn0O2SoiDqqi78EO38Id6L7eDExAzZg0SK7WHA60RgSLqTThTx7uqkxEKcFwno-BCGItnwVamorJrxkx9ood2VQTjxv9XNGlnBsjzbmaBEtqiW5Lut4fjOAvC7m6L6gPcSOujHRfHcNYup87rapx-P-Q
+token B: eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.E6BjF1lcZLY19HTm9c-hLrvmKtGlJTSr91rImD5hJEyfKhjHUN9dbcgGx0shmrvniFATvluMheA42FiIDD8_68MiV4MTZQp4JD-B8NMlFUHvawhrVZ9Cs4w2G_22wndPklwsjsLLzHUM4bOSO99hfAuOCG7yOnTQKt6wgSBLEHVcmDNv1xOXPEtREO4Dh2332hb7_i2D2P9MOObgKBzsu0pJrC6k5dUm_yoDBKElukuW0bGe5gJ8GwaJ7yoJb3MQX0FyjLU_gSvZ898_Utfaxj42IWJSgEnC9RxqjugPc1CKlBxAnIU7q2q9jCp-QqaHXVorTRXwFQwDWi3O-Q62eQ
+Tokens identical?  False  &lt;- expect False (random salt)
+Both PS256 tokens verify correctly. ✔
+
+======================================================================
+RS256 — sign identical payload twice
+======================================================================
+token A: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.kkj7jHDuq3RXPc97URMY1GfSa-fpv7iRB5vRr5qBWJYH3R805kcFluHMqGsg1WwZPJs7rZCXr-Z9s0sNUTFEkOgjAcJS6ErvPH6IcgtdZTbY7GXIxxgPsOeAokyX03Jk7hRaS0_lMzzIQwlue_GxAuwywOwgaBFCHXIbBgyd0rK2oy7invfIVWW2VTFI6AmE0AAYF-x4ktoD-PgqrywUFh_o-6jqwYJdcYRnxriuYsWwtVjtqdxABIBGf2F2g9F-0uLGaQGWg90BngtLzigMoWuvPnAtmeilOQ40YDByYniwVb5rQw7Y2GvM92sZUx_fZatS4zwvkbyyOVkX-7O0Rw
+token B: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm1zZyI6InNpZ24gbWUgdHdpY2UifQ.kkj7jHDuq3RXPc97URMY1GfSa-fpv7iRB5vRr5qBWJYH3R805kcFluHMqGsg1WwZPJs7rZCXr-Z9s0sNUTFEkOgjAcJS6ErvPH6IcgtdZTbY7GXIxxgPsOeAokyX03Jk7hRaS0_lMzzIQwlue_GxAuwywOwgaBFCHXIbBgyd0rK2oy7invfIVWW2VTFI6AmE0AAYF-x4ktoD-PgqrywUFh_o-6jqwYJdcYRnxriuYsWwtVjtqdxABIBGf2F2g9F-0uLGaQGWg90BngtLzigMoWuvPnAtmeilOQ40YDByYniwVb5rQw7Y2GvM92sZUx_fZatS4zwvkbyyOVkX-7O0Rw
+Tokens identical?  True  &lt;- expect True (deterministic)
+
+Summary: PSS adds per-signature randomness; PKCS#1 v1.5 does not.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_pss_is_probabilistic.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · RSA-PSS · 03 — PSS is PROBABILISTIC (RS is deterministic)</span>
+<span class="sd">==============================================================</span>
+
+<span class="sd">This is the defining behavioural difference between the two RSA schemes:</span>
+
+<span class="sd">    PS256 (RSASSA-PSS)        -&gt; randomised: signing injects a random *salt*,</span>
+<span class="sd">                                  so signing the SAME payload twice yields TWO</span>
+<span class="sd">                                  DIFFERENT tokens.</span>
+
+<span class="sd">    RS256 (RSASSA-PKCS1-v1.5) -&gt; deterministic: signing the SAME payload twice</span>
+<span class="sd">                                  with the SAME key yields the SAME token,</span>
+<span class="sd">                                  byte-for-byte.</span>
+
+<span class="sd">Both are perfectly valid and both verify correctly. The randomness in PSS is a</span>
+<span class="sd">security feature (it strengthens the proof of security and resists certain</span>
+<span class="sd">attacks), not a bug.</span>
+
+<span class="sd">We sign the identical payload twice with each scheme and compare.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># One key used for everything below.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;carol&quot;</span><span class="p">,</span> <span class="s2">&quot;msg&quot;</span><span class="p">:</span> <span class="s2">&quot;sign me twice&quot;</span><span class="p">}</span>
+
+    <span class="c1"># --- PS256: expect TWO DIFFERENT tokens ---</span>
+    <span class="n">ps_a</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;PS256&quot;</span><span class="p">)</span>
+    <span class="n">ps_b</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;PS256&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PS256 — sign identical payload twice&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token A:&quot;</span><span class="p">,</span> <span class="n">ps_a</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token B:&quot;</span><span class="p">,</span> <span class="n">ps_b</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Tokens identical? &quot;</span><span class="p">,</span> <span class="n">ps_a</span> <span class="o">==</span> <span class="n">ps_b</span><span class="p">,</span> <span class="s2">&quot; &lt;- expect False (random salt)&quot;</span><span class="p">)</span>
+    <span class="c1"># Both still verify just fine:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ps_a</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;PS256&quot;</span><span class="p">])</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ps_b</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;PS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Both PS256 tokens verify correctly. ✔&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- RS256: expect TWO IDENTICAL tokens ---</span>
+    <span class="n">rs_a</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="n">rs_b</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RS256 — sign identical payload twice&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token A:&quot;</span><span class="p">,</span> <span class="n">rs_a</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;token B:&quot;</span><span class="p">,</span> <span class="n">rs_b</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Tokens identical? &quot;</span><span class="p">,</span> <span class="n">rs_a</span> <span class="o">==</span> <span class="n">rs_b</span><span class="p">,</span> <span class="s2">&quot; &lt;- expect True (deterministic)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Summary: PSS adds per-signature randomness; PKCS#1 v1.5 does not.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/08-rsa-pss-algorithms/03_pss_is_probabilistic.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_pss_vs_pkcs1">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>PSS Vs Pkcs1</b><span>04_pss_vs_pkcs1.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Two padding schemes, one RSA key. Which should you choose?</p>
+<p>┌─────────────┬──────────────────────────┬─────────────────────────────┐
+  │             │ RS<em>  (PKCS#1 v1.5)        │ PS</em>  (RSASSA-PSS)           │
+  ├─────────────┼──────────────────────────┼─────────────────────────────┤
+  │ Padding     │ PKCS#1 v1.5 (1993)        │ PSS (provably secure)        │
+  │ Randomness  │ Deterministic             │ Probabilistic (random salt)  │
+  │ Status      │ Legacy, still widely used │ Modern, recommended for new  │
+  │ Security    │ Adequate, older proofs    │ Stronger security reduction  │
+  │ Same key?   │ ────────  yes, both schemes share one RSA keypair  ──── │
+  └─────────────┴──────────────────────────┴─────────────────────────────┘</p>
+<p>Guidance: for NEW systems prefer <strong>PS256/PS384/PS512</strong>. Keep <strong>RS256</strong> when you
+must interoperate with older verifiers that don't understand PSS (still the
+default in much of the OAuth/OIDC ecosystem).</p>
+<p>This script signs one payload with RS256 and PS256 using the SAME key and
+verifies both.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_pss_vs_pkcs1.py</span></div><pre>RS256 (PKCS#1 v1.5, deterministic, legacy):
+   eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYXZlIn0.K16e3dHgQQQ1eXDLiUfD_1MO-6WJuT30WxduiaBThuviiP8OXExO_K-FmzEGwZLxYgtmqBBdcegYS0N8uGP2jruYgC2WZRXJkmmKSpx8aJeAKF4-UKKN7wgZyWiYd3WslQlpgknBhQheR-Zs68liBi6sb34vBvxkoeAu6bR12h35KPq72RoyeaCI0RaaDSve5TjLUgUagtYXt_ipDhbbahVoPsut-3tgt-_CEBh3rQh6xZfhpnK5CFDkHg2jGRs0u0GCsjXBF5rHgalMB_SEzIpoFld8Gy8R5kruwz-LzcXmnprG0NvQ7ucI7wuoRuYBMz1fbQAcdCK3Pe8dczcz2g
+   verified -&gt; {&#x27;sub&#x27;: &#x27;dave&#x27;}
+
+PS256 (RSASSA-PSS, randomised, modern):
+   eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkYXZlIn0.OvnEspe_4vfbnb_pNAg9bCyivoT-Rge87QLnTc8SRd0ABajGTjRx6STDkTLVUyHKtyU6aDf1zwSregnDhrlhKoxxDlM0HoReEEETz5S78Uy7rpSGEhiMXq9ukTx-HyfMWypVMvwBumoxtCNulrKF2rEMUS8zzOhVJdCKkGszTF1ciGjZ3YyFzIxVJlhOcWvI_JMnhdP7qxspUi95FL344xHPQT89cBSaV7dof5t2JILCHlEO8a-DH8iTx9EnUxWuWk2qzm7Y9XfPLSELxxUZgsFDxBbeYp3N0_QnJBUz1wDTuwfqXoIHjQZSzNVelrgo6IqCjg_IDBpbGLR3BqNNNw
+   verified -&gt; {&#x27;sub&#x27;: &#x27;dave&#x27;}
+
+Same RSA key, two padding schemes. Prefer PS* for new designs.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_pss_vs_pkcs1.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · RSA-PSS · 04 — PSS vs PKCS#1 v1.5  (PS* vs RS*)</span>
+<span class="sd">===================================================</span>
+
+<span class="sd">Two padding schemes, one RSA key. Which should you choose?</span>
+
+<span class="sd">  ┌─────────────┬──────────────────────────┬─────────────────────────────┐</span>
+<span class="sd">  │             │ RS*  (PKCS#1 v1.5)        │ PS*  (RSASSA-PSS)           │</span>
+<span class="sd">  ├─────────────┼──────────────────────────┼─────────────────────────────┤</span>
+<span class="sd">  │ Padding     │ PKCS#1 v1.5 (1993)        │ PSS (provably secure)        │</span>
+<span class="sd">  │ Randomness  │ Deterministic             │ Probabilistic (random salt)  │</span>
+<span class="sd">  │ Status      │ Legacy, still widely used │ Modern, recommended for new  │</span>
+<span class="sd">  │ Security    │ Adequate, older proofs    │ Stronger security reduction  │</span>
+<span class="sd">  │ Same key?   │ ────────  yes, both schemes share one RSA keypair  ──── │</span>
+<span class="sd">  └─────────────┴──────────────────────────┴─────────────────────────────┘</span>
+
+<span class="sd">Guidance: for NEW systems prefer **PS256/PS384/PS512**. Keep **RS256** when you</span>
+<span class="sd">must interoperate with older verifiers that don&#39;t understand PSS (still the</span>
+<span class="sd">default in much of the OAuth/OIDC ecosystem).</span>
+
+<span class="sd">This script signs one payload with RS256 and PS256 using the SAME key and</span>
+<span class="sd">verifies both.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;dave&quot;</span><span class="p">}</span>
+
+    <span class="n">rs</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="n">ps</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;PS256&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RS256 (PKCS#1 v1.5, deterministic, legacy):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span><span class="p">,</span> <span class="n">rs</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   verified -&gt;&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">rs</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">PS256 (RSASSA-PSS, randomised, modern):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span><span class="p">,</span> <span class="n">ps</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   verified -&gt;&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ps</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;PS256&quot;</span><span class="p">]))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Same RSA key, two padding schemes. Prefer PS* for new designs.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/08-rsa-pss-algorithms/04_pss_vs_pkcs1.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_same_key_both_schemes">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Same Key Both Schemes</b><span>05_same_key_both_schemes.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>We established that a single RSA keypair can sign with both RS256 and PS256.
+But the <strong>verifier must whitelist the correct algorithm</strong>. A token signed with
+PS256 will NOT verify if you tell PyJWT to expect only RS256 — even though the
+exact same key pair is involved — because the padding differs.</p>
+<p>This protects you: the <code>algorithms=[...]</code> allow-list on <code>jwt.decode()</code> is a
+security control. Never set it to a permissive catch-all.</p>
+<p>This script proves:
+    1. RS256 token verifies as RS256.            ✔
+    2. PS256 token verifies as PS256.            ✔
+    3. PS256 token FAILS to verify as RS256.     ✘ (caught &amp; explained)</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_same_key_both_schemes.py</span></div><pre>1) RS256 token verified as RS256:
+    {&#x27;sub&#x27;: &#x27;erin&#x27;}
+
+2) PS256 token verified as PS256:
+    {&#x27;sub&#x27;: &#x27;erin&#x27;}
+
+3) PS256 token verified as RS256 (EXPECTED TO FAIL):
+   Caught InvalidAlgorithmError: The specified alg value is not allowed
+   The token&#x27;s alg (PS256) is not in the allow-list [&#x27;RS256&#x27;].
+
+The decode-time algorithms allow-list is a real security boundary.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_same_key_both_schemes.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · RSA-PSS · 05 — One RSA key, both schemes; algorithms aren&#39;t interchangeable</span>
+<span class="sd">================================================================================</span>
+
+<span class="sd">We established that a single RSA keypair can sign with both RS256 and PS256.</span>
+<span class="sd">But the **verifier must whitelist the correct algorithm**. A token signed with</span>
+<span class="sd">PS256 will NOT verify if you tell PyJWT to expect only RS256 — even though the</span>
+<span class="sd">exact same key pair is involved — because the padding differs.</span>
+
+<span class="sd">This protects you: the `algorithms=[...]` allow-list on `jwt.decode()` is a</span>
+<span class="sd">security control. Never set it to a permissive catch-all.</span>
+
+<span class="sd">This script proves:</span>
+<span class="sd">    1. RS256 token verifies as RS256.            ✔</span>
+<span class="sd">    2. PS256 token verifies as PS256.            ✔</span>
+<span class="sd">    3. PS256 token FAILS to verify as RS256.     ✘ (caught &amp; explained)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;erin&quot;</span><span class="p">}</span>
+
+    <span class="n">rs_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="n">ps_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;PS256&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1) RS256 token verified as RS256:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   &quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">rs_token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">]))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2) PS256 token verified as PS256:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   &quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ps_token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;PS256&quot;</span><span class="p">]))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3) PS256 token verified as RS256 (EXPECTED TO FAIL):&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">ps_token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   !! Unexpected success.&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAlgorithmError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Caught InvalidAlgorithmError:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   The token&#39;s alg (PS256) is not in the allow-list [&#39;RS256&#39;].&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Caught InvalidSignatureError:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">The decode-time algorithms allow-list is a real security boundary.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/08-rsa-pss-algorithms/05_same_key_both_schemes.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="07-ecdsa-algorithms.html"><div class="dir">← Previous</div><div class="ttl">07 · Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</div></a><a class="next" href="09-eddsa-algorithms.html"><div class="dir">Next →</div><div class="ttl">09 · Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

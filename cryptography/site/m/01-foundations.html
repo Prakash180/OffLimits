@@ -1,0 +1,1147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 01 · Foundations — What a JWT actually is · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html" class="active"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>01 · Module 01 · Foundations — What a JWT actually is</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#22d3ee,#0ea5e9)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#22d3ee;border-color:#22d3ee55;background:#22d3ee11">Module 01</span>
+  <h1 style="margin-top:18px">Module 01 · Foundations — What a JWT actually is</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>A JWT looks like one opaque blob of gibberish, but it is really just <strong>three pieces of text glued together with dots</strong>: <code>header.payload.signature</code>. The first two pieces are nothing more than JSON dictionaries that have been run through base64url encoding — a reversible <em>transport</em> trick, not a lock. If you split the string on the dot and decode the chunks, the JSON pops right back out in plaintext. No key required. That single fact reorganizes everything: a JWT is a <strong>public postcard with a tamper-evident seal</strong>, not a sealed envelope.</p>
+<p>The third piece — the signature — is where the cryptography lives. It is the raw output of an HMAC (for HS256) computed over the <em>exact</em> ASCII string <code>base64url(header) + "." + base64url(payload)</code>. Notice what gets signed: the <strong>encoded</strong> bytes, not your original Python dict. That is why even a single flipped character in the payload produces a completely different signature. The signature doesn't hide anything; it <em>binds</em> the header and payload together so that any change is detectable by anyone holding the secret.</p>
+<p>base64url itself is worth internalizing. Standard base64 uses <code>+</code>, <code>/</code>, and <code>=</code> — all awkward inside URLs and HTTP headers. base64url swaps <code>+→-</code>, <code>/→_</code>, and <strong>drops the <code>=</code> padding</strong> so a token can be dropped straight into a <code>Authorization</code> header or query string. The cost: when you decode by hand you must <em>re-add</em> the padding back to a multiple of four, which is exactly what the scripts here do with <code>(-len(seg)) % 4</code>.</p>
+<p>The deepest lesson of this module is the distinction between <strong>integrity</strong> and <strong>confidentiality</strong>. The signature gives you integrity (was this changed?) and authenticity (was this signed by someone with the key?). It gives you <em>zero</em> confidentiality. Reading the payload requires no secret at all — so anything secret you place inside is effectively public.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Think of a JWT as a <strong>wax-sealed letter written in plain ink</strong>. Anyone who intercepts it can read every word — the seal doesn't hide the text. But the seal is pressed with a unique signet ring (the secret). If a meddler scratches out a word and rewrites it, the seal cracks and no longer matches. You can't read the seal to learn the message; you only check whether it's intact.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>jwt.encode({...}, SECRET, algorithm="HS256")</code> serializes your dict to compact JSON, base64url-encodes the header and payload, joins them with a <code>.</code>, and computes the HMAC-SHA256 over that joined string.</li>
+<li>The HMAC digest is itself base64url-encoded and appended as the third segment, producing one <code>str</code> (PyJWT 2.x returns <code>str</code>, not <code>bytes</code>).</li>
+<li>The scripts call <code>token.split(".")</code> to recover the three segments as raw text.</li>
+<li><code>b64url_decode</code> re-adds the stripped <code>=</code> padding, then <code>base64.urlsafe_b64decode</code> turns each segment back into JSON bytes — <strong>without any key</strong>.</li>
+<li><code>jwt.decode(token, ..., options={"verify_signature": False})</code> reads the same claims while explicitly <em>skipping</em> the integrity check.</li>
+<li>Tampering scripts mutate a byte in the payload segment, re-join the token, and call <code>decode()</code> with verification on — PyJWT recomputes the HMAC, finds a mismatch, and raises <code>InvalidSignatureError</code>.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>02_base64url_decode.py</code>, the header and payload print as readable JSON with <strong>no secret supplied</strong> — proof the payload is public.</li>
+<li>In <code>05_jwt_is_signed_not_encrypted.py</code>, a "secret" placed in the payload is recovered verbatim by anyone — the script is a live demonstration that JWTs are <em>not</em> encrypted.</li>
+<li>In <code>06_tampering_breaks_signature.py</code>, changing one character flips the verification from success to <code>InvalidSignatureError</code> — the seal cracks.</li>
+<li>In <code>07_get_unverified_header.py</code>, <code>get_unverified_header()</code> reads <code>alg</code>/<code>kid</code> <em>before</em> any key is chosen — useful for routing, never for trust.</li>
+<li>The signature segment is shorter and more random-looking than header/payload because it encodes 32 raw HMAC bytes, not JSON.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li>❌ "JWTs are encrypted." False — they are <strong>signed</strong>. The payload is plain base64url JSON anyone can read.</li>
+<li>❌ "I need the secret to read the claims." False — decoding requires no key; only <em>verifying</em> the signature does.</li>
+<li>❌ "A successful unverified decode means the token is trustworthy." False — <code>verify_signature: False</code> and <code>get_unverified_header</code> return attacker-controllable data.</li>
+<li>❌ "base64url is the same as base64." False — different alphabet (<code>-</code>/<code>_</code>) and no <code>=</code> padding, so manual decoding needs the padding restored first.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-01-foundations-what-a-jwt-actually-is">🧱 Module 01 · Foundations — What a JWT <em>actually</em> is</h1>
+<blockquote>
+<p>Before you sign anything, encrypt anything, or wire up an auth flow, you need
+to understand what a JSON Web Token <strong>is at the byte level</strong>. This module
+strips a JWT down to its raw pieces and rebuilds your mental model from
+scratch.</p>
+</blockquote>
+<hr />
+<h2 id="what-youll-learn">🎯 What you'll learn</h2>
+<p>A signed JWT is deceptively simple: <strong>three base64url-encoded chunks joined by
+dots</strong>.</p>
+<div class="codehl"><pre><span></span><code>header . payload . signature
+</code></pre></div>
+
+<ul>
+<li>The <strong>header</strong> is a tiny JSON object saying <em>how</em> the token was signed.</li>
+<li>The <strong>payload</strong> is JSON carrying <em>claims</em> (data about a user/session).</li>
+<li>The <strong>signature</strong> is raw cryptographic bytes proving the first two parts
+  weren't tampered with.</li>
+</ul>
+<p>The single most important takeaway of this module: a JWT is <strong>signed, not
+encrypted</strong>. Anyone can read the payload — the signature only guarantees
+<em>integrity</em>, never <em>confidentiality</em>.</p>
+<hr />
+<h2 id="jwt-structure-at-a-glance">🗺️ JWT structure at a glance</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    T[&quot;JWT string&lt;br/&gt;xxxxx.yyyyy.zzzzz&quot;] --&gt; H[&quot;Header&lt;br/&gt;(base64url JSON)&quot;]
+    T --&gt; P[&quot;Payload&lt;br/&gt;(base64url JSON)&quot;]
+    T --&gt; S[&quot;Signature&lt;br/&gt;(base64url bytes)&quot;]
+    H --&gt; HJ[&quot;{ alg: HS256, typ: JWT }&quot;]
+    P --&gt; PJ[&quot;{ user: alice, role: admin }&quot;]
+    S --&gt; SJ[&quot;HMAC/Signature over&lt;br/&gt;header.payload&quot;]</div></div>
+<div class="mermaid-wrap reveal"><div class="mermaid">sequenceDiagram
+    participant Dev as Your code
+    participant JWT as PyJWT
+    Dev-&gt;&gt;JWT: encode(claims, secret, alg=HS256)
+    JWT--&gt;&gt;Dev: &quot;header.payload.signature&quot; (str)
+    Dev-&gt;&gt;JWT: decode(token, secret, algorithms=[HS256])
+    JWT--&gt;&gt;Dev: claims dict (verified)</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_anatomy_of_a_jwt">01_anatomy_of_a_jwt.py</a></td>
+<td>Split a token on <code>.</code> and label the 3 parts</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/01_anatomy_of_a_jwt.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_base64url_decode">02_base64url_decode.py</a></td>
+<td>Manually base64url-decode header &amp; payload; why base64url</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/02_base64url_decode.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_header_vs_payload_vs_signature">03_header_vs_payload_vs_signature.py</a></td>
+<td>Pretty-print header &amp; payload dicts; signature is raw bytes</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/03_header_vs_payload_vs_signature.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_decode_without_verification">04_decode_without_verification.py</a></td>
+<td>Read claims with <code>verify_signature: False</code>; the danger</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/04_decode_without_verification.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_jwt_is_signed_not_encrypted">05_jwt_is_signed_not_encrypted.py</a></td>
+<td>Prove anyone can read the payload — never store secrets</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/05_jwt_is_signed_not_encrypted.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_tampering_breaks_signature">06_tampering_breaks_signature.py</a></td>
+<td>Tamper with a payload → <code>InvalidSignatureError</code></td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/06_tampering_breaks_signature.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_get_unverified_header">07_get_unverified_header.py</a></td>
+<td>Read <code>alg</code>/<code>kid</code> with <code>get_unverified_header</code></td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/07_get_unverified_header.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_encode_decode_roundtrip">08_encode_decode_roundtrip.py</a></td>
+<td>Minimal full HS256 round trip, stage by stage</td>
+<td><code>.venv/bin/python pyjwt-course/01-foundations/08_encode_decode_roundtrip.py</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Run them in order — each builds on the previous one.</p>
+</blockquote>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ol>
+<li><strong>Three parts, always.</strong> A signed JWT is <code>header.payload.signature</code>. Splitting
+   on <code>.</code> is the first thing every JWT library does.</li>
+<li><strong>base64url, not base64.</strong> The <code>-</code>/<code>_</code> alphabet and dropped <code>=</code> padding make
+   tokens URL- and header-safe. You must re-add padding when decoding by hand.</li>
+<li><strong>The payload is public.</strong> It's just encoded JSON. Decoding needs <em>no key</em>.</li>
+<li><strong>The signature provides integrity.</strong> Change one byte → verification fails.</li>
+<li><strong>Unverified reads are hints, not trust.</strong> <code>verify_signature: False</code> and
+   <code>get_unverified_header</code> are for <em>setting up</em> verification (e.g. picking a
+   key), never for authorization.</li>
+</ol>
+<hr />
+<h2 id="common-pitfalls">⚠️ Common pitfalls</h2>
+<ul>
+<li>❌ <strong>"It's encrypted, so I'll store the user's password in it."</strong> No — anyone
+  can read the payload. Never put secrets in a JWT.</li>
+<li>❌ <strong>Trusting an unverified decode.</strong> Reading claims without checking the
+  signature gives you <em>attacker-controlled</em> data.</li>
+<li>❌ <strong>Forgetting <code>=</code> padding</strong> when decoding base64url manually → <code>binascii</code>
+  errors. Pad to a multiple of 4 first.</li>
+<li>❌ <strong>Assuming <code>decode()</code> is optional about <code>algorithms=</code>.</strong> It's required in
+  PyJWT 2.x; you'll see why in module 02.</li>
+</ul>
+<hr />
+<h2 id="next-up">➡️ Next up</h2>
+<p><strong><a href="02-getting-started-hs256.html">Module 02 · Getting started with HS256</a></strong> — your
+first real encode/decode, secret strength, <code>str</code> vs <code>bytes</code>, and a tiny login
+simulation.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_anatomy_of_a_jwt" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Anatomy Of A JWT</b><span>01_anatomy_of_a_jwt.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A JSON Web Token (JWT) is <em>not</em> one opaque blob — it is three distinct pieces
+of text joined by dots:</p>
+<div class="codehl"><pre><span></span><code>    header  .  payload  .  signature
+</code></pre></div>
+
+<p>This script takes a real token, splits it on the '.' separators, and labels
+each of the three parts so you can see the structure with your own eyes.</p>
+<p>Key idea: a JWT is a <em>string</em> with a very specific shape. Before any crypto
+happens, it is just <code>xxxxx.yyyyy.zzzzz</code>.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_anatomy_of_a_jwt.py</span></div><pre>============================================================
+THE RAW TOKEN
+============================================================
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UiLCJyb2xlIjoiYWRtaW4ifQ.YUXWE09MIgCCCQ5ikSxzFoMEFaJkxh3QCaai8Z8oXKw
+
+============================================================
+SPLITTING ON &#x27;.&#x27;
+============================================================
+Number of segments: 3  (always 3 for a signed JWT)
+
+[1] HEADER segment   (metadata: which algorithm signed this token)
+    eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+
+[2] PAYLOAD segment  (the claims: data about the user/session)
+    eyJ1c2VyIjoiYWxpY2UiLCJyb2xlIjoiYWRtaW4ifQ
+
+[3] SIGNATURE segment (cryptographic proof over header.payload)
+    YUXWE09MIgCCCQ5ikSxzFoMEFaJkxh3QCaai8Z8oXKw
+
+============================================================
+TAKEAWAY
+============================================================
+A JWT is literally: &lt;header&gt;.&lt;payload&gt;.&lt;signature&gt;
+The first two parts are encoded JSON; the third is an encoded MAC/
+signature. Next script: decode the base64url parts back into JSON.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_anatomy_of_a_jwt.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">01 · Anatomy of a JWT</span>
+<span class="sd">=====================</span>
+
+<span class="sd">A JSON Web Token (JWT) is *not* one opaque blob — it is three distinct pieces</span>
+<span class="sd">of text joined by dots:</span>
+
+<span class="sd">        header  .  payload  .  signature</span>
+
+<span class="sd">This script takes a real token, splits it on the &#39;.&#39; separators, and labels</span>
+<span class="sd">each of the three parts so you can see the structure with your own eyes.</span>
+
+<span class="sd">Key idea: a JWT is a *string* with a very specific shape. Before any crypto</span>
+<span class="sd">happens, it is just `xxxxx.yyyyy.zzzzz`.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># We build a token so the script is fully self-contained (no network needed).</span>
+<span class="c1"># Don&#39;t worry about encode() yet — module 02 covers it in depth.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-teaching-key-at-least-32b!&quot;</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE RAW TOKEN&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># A JWT in &quot;compact serialization&quot; form is always three base64url segments</span>
+<span class="c1"># separated by &#39;.&#39; characters. Splitting on &#39;.&#39; gives us those segments.</span>
+<span class="n">parts</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SPLITTING ON &#39;.&#39;&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of segments: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span><span class="si">}</span><span class="s2">  (always 3 for a signed JWT)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Label each segment. The order is ALWAYS header, payload, signature.</span>
+<span class="n">header_segment</span><span class="p">,</span> <span class="n">payload_segment</span><span class="p">,</span> <span class="n">signature_segment</span> <span class="o">=</span> <span class="n">parts</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[1] HEADER segment   (metadata: which algorithm signed this token)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">header_segment</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[2] PAYLOAD segment  (the claims: data about the user/session)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">payload_segment</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[3] SIGNATURE segment (cryptographic proof over header.payload)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">signature_segment</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TAKEAWAY&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;A JWT is literally: &lt;header&gt;.&lt;payload&gt;.&lt;signature&gt;&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;The first two parts are encoded JSON; the third is an encoded MAC/&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;signature. Next script: decode the base64url parts back into JSON.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/01_anatomy_of_a_jwt.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_base64url_decode">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Base64url Decode</b><span>02_base64url_decode.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The header and payload of a JWT are JSON objects that have been encoded with
+<strong>base64url</strong> (RFC 4648 §5), NOT standard base64. This script decodes them
+manually — no PyJWT helpers — so you understand exactly what is happening.</p>
+<p>Why base64url instead of standard base64?
+  * Standard base64 uses '+' and '/' and '=' padding.
+  * Those characters are unsafe/awkward inside URLs, HTTP headers, and cookies
+    ('+' becomes a space, '/' is a path separator, '=' needs escaping).
+  * base64url swaps '+' -&gt; '-' and '/' -&gt; '_' and DROPS the '=' padding,
+    making the token safe to drop straight into a URL or header.</p>
+<p>Because the '=' padding is removed, we must add it back before decoding.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_base64url_decode.py</span></div><pre>============================================================
+HEADER segment -&gt; JSON
+============================================================
+encoded : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+raw json: {&quot;alg&quot;:&quot;HS256&quot;,&quot;typ&quot;:&quot;JWT&quot;}
+as dict : {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+
+============================================================
+PAYLOAD segment -&gt; JSON
+============================================================
+encoded : eyJ1c2VyIjoiYWxpY2UiLCJzY29wZSI6WyJyZWFkIiwid3JpdGUiXX0
+raw json: {&quot;user&quot;:&quot;alice&quot;,&quot;scope&quot;:[&quot;read&quot;,&quot;write&quot;]}
+as dict : {&#x27;user&#x27;: &#x27;alice&#x27;, &#x27;scope&#x27;: [&#x27;read&#x27;, &#x27;write&#x27;]}
+
+============================================================
+WHY base64url (and not base64)?
+============================================================
+base64url replaces &#x27;+&#x27; -&gt; &#x27;-&#x27;, &#x27;/&#x27; -&gt; &#x27;_&#x27;, and removes &#x27;=&#x27; padding,
+so the token is safe inside URLs, HTTP headers, and cookies.
+We re-added the missing &#x27;=&#x27; padding before decoding above.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_base64url_decode.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">02 · base64url decoding by hand</span>
+<span class="sd">===============================</span>
+
+<span class="sd">The header and payload of a JWT are JSON objects that have been encoded with</span>
+<span class="sd">**base64url** (RFC 4648 §5), NOT standard base64. This script decodes them</span>
+<span class="sd">manually — no PyJWT helpers — so you understand exactly what is happening.</span>
+
+<span class="sd">Why base64url instead of standard base64?</span>
+<span class="sd">  * Standard base64 uses &#39;+&#39; and &#39;/&#39; and &#39;=&#39; padding.</span>
+<span class="sd">  * Those characters are unsafe/awkward inside URLs, HTTP headers, and cookies</span>
+<span class="sd">    (&#39;+&#39; becomes a space, &#39;/&#39; is a path separator, &#39;=&#39; needs escaping).</span>
+<span class="sd">  * base64url swaps &#39;+&#39; -&gt; &#39;-&#39; and &#39;/&#39; -&gt; &#39;_&#39; and DROPS the &#39;=&#39; padding,</span>
+<span class="sd">    making the token safe to drop straight into a URL or header.</span>
+
+<span class="sd">Because the &#39;=&#39; padding is removed, we must add it back before decoding.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># Build a token to dissect (self-contained; see module 02 for encode details).</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;a-32-byte-or-longer-demo-signing-secret!&quot;</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">,</span> <span class="s2">&quot;write&quot;</span><span class="p">]},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="n">header_segment</span><span class="p">,</span> <span class="n">payload_segment</span><span class="p">,</span> <span class="n">signature_segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_decode</span><span class="p">(</span><span class="n">segment</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode a base64url string, restoring the stripped &#39;=&#39; padding.</span>
+
+<span class="sd">    base64 requires the input length to be a multiple of 4. JWT segments have</span>
+<span class="sd">    their padding removed, so we re-add the right number of &#39;=&#39; characters.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># How many padding chars are missing? base64 works in blocks of 4.</span>
+    <span class="n">padding_needed</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">))</span> <span class="o">%</span> <span class="mi">4</span>
+    <span class="n">segment_padded</span> <span class="o">=</span> <span class="n">segment</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="n">padding_needed</span><span class="p">)</span>
+    <span class="c1"># urlsafe_b64decode understands the &#39;-&#39; and &#39;_&#39; alphabet of base64url.</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment_padded</span><span class="p">)</span>
+
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HEADER segment -&gt; JSON&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;encoded : </span><span class="si">{</span><span class="n">header_segment</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">header_bytes</span> <span class="o">=</span> <span class="n">b64url_decode</span><span class="p">(</span><span class="n">header_segment</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;raw json: </span><span class="si">{</span><span class="n">header_bytes</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;as dict : </span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">header_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PAYLOAD segment -&gt; JSON&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;encoded : </span><span class="si">{</span><span class="n">payload_segment</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">payload_bytes</span> <span class="o">=</span> <span class="n">b64url_decode</span><span class="p">(</span><span class="n">payload_segment</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;raw json: </span><span class="si">{</span><span class="n">payload_bytes</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;as dict : </span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">payload_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHY base64url (and not base64)?&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;base64url replaces &#39;+&#39; -&gt; &#39;-&#39;, &#39;/&#39; -&gt; &#39;_&#39;, and removes &#39;=&#39; padding,&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;so the token is safe inside URLs, HTTP headers, and cookies.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;We re-added the missing &#39;=&#39; padding before decoding above.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/02_base64url_decode.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_header_vs_payload_vs_signature">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Header Vs Payload Vs Signature</b><span>03_header_vs_payload_vs_signature.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Now that we can decode the segments, let's clearly separate the THREE roles:</p>
+<ul>
+<li>HEADER    — a small JSON object describing HOW the token is signed
+                (e.g. {"alg": "HS256", "typ": "JWT"}).</li>
+<li>PAYLOAD   — a JSON object of "claims" (the actual data).</li>
+<li>SIGNATURE — NOT JSON. It is raw cryptographic bytes computed over
+                <code>header.payload</code>. Trying to read it as JSON is meaningless.</li>
+</ul>
+<p>This script pretty-prints the header and payload dicts, and proves the
+signature is binary, not text/JSON.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_header_vs_payload_vs_signature.py</span></div><pre>============================================================
+HEADER  (decoded JSON, pretty-printed)
+============================================================
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;
+}
+-&gt; &#x27;alg&#x27; tells the verifier which algorithm to use.
+-&gt; &#x27;typ&#x27; is just a media-type hint, almost always &#x27;JWT&#x27;.
+
+============================================================
+PAYLOAD  (decoded JSON, pretty-printed)
+============================================================
+{
+  &quot;user&quot;: &quot;alice&quot;,
+  &quot;role&quot;: &quot;admin&quot;,
+  &quot;active&quot;: true
+}
+-&gt; These key/value pairs are called &#x27;claims&#x27;.
+
+============================================================
+SIGNATURE  (raw bytes — NOT JSON)
+============================================================
+length      : 32 bytes
+raw bytes   : b&#x27;?\xf3\x1e\x80\xf7\xc4\x01\x07L\xf4\\\x7f\x1f\xc7\xdb&lt;v\xf2\n\xd8t\x88t*\x07\x08l\x0b\x9c\x12\xbd_&#x27;
+hex view    : 3ff31e80f7c401074cf45c7f1fc7db3c76f20ad87488742a07086c0b9c12bd5f
+
+Parsing the signature as JSON FAILS, as expected: UnicodeDecodeError
+The signature is a binary MAC, not human-readable data.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_header_vs_payload_vs_signature.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">03 · Header vs Payload vs Signature</span>
+<span class="sd">===================================</span>
+
+<span class="sd">Now that we can decode the segments, let&#39;s clearly separate the THREE roles:</span>
+
+<span class="sd">  * HEADER    — a small JSON object describing HOW the token is signed</span>
+<span class="sd">                (e.g. {&quot;alg&quot;: &quot;HS256&quot;, &quot;typ&quot;: &quot;JWT&quot;}).</span>
+<span class="sd">  * PAYLOAD   — a JSON object of &quot;claims&quot; (the actual data).</span>
+<span class="sd">  * SIGNATURE — NOT JSON. It is raw cryptographic bytes computed over</span>
+<span class="sd">                `header.payload`. Trying to read it as JSON is meaningless.</span>
+
+<span class="sd">This script pretty-prints the header and payload dicts, and proves the</span>
+<span class="sd">signature is binary, not text/JSON.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+    <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;active&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+    <span class="s2">&quot;a-32-byte-or-longer-demo-signing-secret!&quot;</span><span class="p">,</span>
+    <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">header_segment</span><span class="p">,</span> <span class="n">payload_segment</span><span class="p">,</span> <span class="n">signature_segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_decode</span><span class="p">(</span><span class="n">segment</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">((</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">))</span> <span class="o">%</span> <span class="mi">4</span><span class="p">))</span>
+
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HEADER  (decoded JSON, pretty-printed)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">header</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">b64url_decode</span><span class="p">(</span><span class="n">header_segment</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&gt; &#39;alg&#39; tells the verifier which algorithm to use.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&gt; &#39;typ&#39; is just a media-type hint, almost always &#39;JWT&#39;.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PAYLOAD  (decoded JSON, pretty-printed)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">b64url_decode</span><span class="p">(</span><span class="n">payload_segment</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&gt; These key/value pairs are called &#39;claims&#39;.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SIGNATURE  (raw bytes — NOT JSON)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">signature_bytes</span> <span class="o">=</span> <span class="n">b64url_decode</span><span class="p">(</span><span class="n">signature_segment</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;length      : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">signature_bytes</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;raw bytes   : </span><span class="si">{</span><span class="n">signature_bytes</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;hex view    : </span><span class="si">{</span><span class="n">signature_bytes</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="c1"># Prove it is not JSON by trying to parse it and catching the failure.</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">signature_bytes</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unexpectedly parsed as JSON?!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">UnicodeDecodeError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Parsing the signature as JSON FAILS, as expected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;The signature is a binary MAC, not human-readable data.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/03_header_vs_payload_vs_signature.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_decode_without_verification">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Decode Without Verification</b><span>04_decode_without_verification.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>PyJWT can decode the claims of a token <em>without checking the signature</em> and
+<em>without a key</em> if you pass options={"verify_signature": False}.</p>
+<p>This is genuinely useful in a few narrow cases (e.g. reading the <code>kid</code> or
+<code>iss</code> to decide WHICH key to fetch before doing a real verification).</p>
+<p>But it is also DANGEROUS if misused: the claims are completely untrusted.
+Anyone could have forged or altered them. Never make a security decision based
+on an unverified token.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_decode_without_verification.py</span></div><pre>============================================================
+DECODE WITHOUT VERIFICATION (no key supplied)
+============================================================
+Claims read without any key: {&#x27;user&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+
+============================================================
+WHY THIS IS DANGEROUS
+============================================================
+These claims are UNTRUSTED. We never checked the signature, so we have
+no proof they weren&#x27;t forged or modified. An attacker could claim
+role=&#x27;admin&#x27; for any user and this call would happily return it.
+
+============================================================
+LEGITIMATE USES (read-then-verify)
+============================================================
+Reading metadata to choose a verification key BEFORE verifying, e.g.:
+  * read &#x27;iss&#x27; to pick the right issuer config
+  * read &#x27;kid&#x27; (in the header) to fetch the matching public key
+...then ALWAYS call jwt.decode(...) again WITH the key to verify.
+
+Rule of thumb: unverified decode = read-only hint, never authorization.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_decode_without_verification.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">04 · Decoding WITHOUT verifying the signature</span>
+<span class="sd">=============================================</span>
+
+<span class="sd">PyJWT can decode the claims of a token *without checking the signature* and</span>
+<span class="sd">*without a key* if you pass options={&quot;verify_signature&quot;: False}.</span>
+
+<span class="sd">This is genuinely useful in a few narrow cases (e.g. reading the `kid` or</span>
+<span class="sd">`iss` to decide WHICH key to fetch before doing a real verification).</span>
+
+<span class="sd">But it is also DANGEROUS if misused: the claims are completely untrusted.</span>
+<span class="sd">Anyone could have forged or altered them. Never make a security decision based</span>
+<span class="sd">on an unverified token.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;the-real-secret-at-least-32-bytes-long!!&quot;</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DECODE WITHOUT VERIFICATION (no key supplied)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="c1"># Note: no secret/key argument is needed at all here.</span>
+<span class="n">unverified_claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Claims read without any key: </span><span class="si">{</span><span class="n">unverified_claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHY THIS IS DANGEROUS&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;These claims are UNTRUSTED. We never checked the signature, so we have&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;no proof they weren&#39;t forged or modified. An attacker could claim&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;role=&#39;admin&#39; for any user and this call would happily return it.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;LEGITIMATE USES (read-then-verify)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading metadata to choose a verification key BEFORE verifying, e.g.:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  * read &#39;iss&#39; to pick the right issuer config&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  * read &#39;kid&#39; (in the header) to fetch the matching public key&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;...then ALWAYS call jwt.decode(...) again WITH the key to verify.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Rule of thumb: unverified decode = read-only hint, never authorization.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/04_decode_without_verification.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_jwt_is_signed_not_encrypted">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>JWT Is Signed Not Encrypted</b><span>05_jwt_is_signed_not_encrypted.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The single most common JWT misconception: "the token is encrypted, so I can
+put secrets in it." FALSE.</p>
+<p>A standard signed JWT (JWS) is:
+  * INTEGRITY-protected — the signature proves it wasn't altered.
+  * NOT confidential    — the payload is just base64url-encoded JSON that
+                          ANYONE can read without any key.</p>
+<p>This script proves it: we read the payload of a token using nothing but
+base64 decoding — no secret, no library verification.</p>
+<p>LESSON: Never put passwords, API keys, credit-card numbers, or any secret in a
+JWT payload. Assume the whole world can read it.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_jwt_is_signed_not_encrypted.py</span></div><pre>============================================================
+THE TOKEN (looks scrambled / &#x27;encrypted&#x27;, right?)
+============================================================
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UiLCJwYXNzd29yZCI6Imh1bnRlcjIiLCJzc24iOiIxMjMtNDUtNjc4OSJ9.7y-GKp7RG-Ju_kTpp3YU-7-I5af5Carag9DK1cLtUo8
+
+============================================================
+READING THE PAYLOAD WITH NO SECRET AT ALL
+============================================================
+Decoded payload: {&#x27;user&#x27;: &#x27;alice&#x27;, &#x27;password&#x27;: &#x27;hunter2&#x27;, &#x27;ssn&#x27;: &#x27;123-45-6789&#x27;}
+
+  -&gt; password leaked: &#x27;hunter2&#x27;
+  -&gt; ssn leaked     : &#x27;123-45-6789&#x27;
+
+============================================================
+TAKEAWAY
+============================================================
+Signed != encrypted. The signature stops TAMPERING, it does NOT hide
+anything. The payload is world-readable.
+RULE: never put secrets in a JWT. (If you truly need confidentiality,
+that is a different spec: JWE — JSON Web Encryption.)</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_jwt_is_signed_not_encrypted.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">05 · A JWT is SIGNED, not ENCRYPTED</span>
+<span class="sd">===================================</span>
+
+<span class="sd">The single most common JWT misconception: &quot;the token is encrypted, so I can</span>
+<span class="sd">put secrets in it.&quot; FALSE.</span>
+
+<span class="sd">A standard signed JWT (JWS) is:</span>
+<span class="sd">  * INTEGRITY-protected — the signature proves it wasn&#39;t altered.</span>
+<span class="sd">  * NOT confidential    — the payload is just base64url-encoded JSON that</span>
+<span class="sd">                          ANYONE can read without any key.</span>
+
+<span class="sd">This script proves it: we read the payload of a token using nothing but</span>
+<span class="sd">base64 decoding — no secret, no library verification.</span>
+
+<span class="sd">LESSON: Never put passwords, API keys, credit-card numbers, or any secret in a</span>
+<span class="sd">JWT payload. Assume the whole world can read it.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;only-the-server-knows-this-32-byte-key!!&quot;</span>
+<span class="c1"># Imagine a careless developer stuffing a secret into the payload:</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+    <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;password&quot;</span><span class="p">:</span> <span class="s2">&quot;hunter2&quot;</span><span class="p">,</span> <span class="s2">&quot;ssn&quot;</span><span class="p">:</span> <span class="s2">&quot;123-45-6789&quot;</span><span class="p">},</span>
+    <span class="n">SECRET</span><span class="p">,</span>
+    <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE TOKEN (looks scrambled / &#39;encrypted&#39;, right?)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;READING THE PAYLOAD WITH NO SECRET AT ALL&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">payload_segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">payload_bytes</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span>
+    <span class="n">payload_segment</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">((</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">payload_segment</span><span class="p">))</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+<span class="p">)</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">payload_bytes</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decoded payload: </span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; password leaked: </span><span class="si">{</span><span class="n">payload</span><span class="p">[</span><span class="s1">&#39;password&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; ssn leaked     : </span><span class="si">{</span><span class="n">payload</span><span class="p">[</span><span class="s1">&#39;ssn&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TAKEAWAY&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Signed != encrypted. The signature stops TAMPERING, it does NOT hide&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;anything. The payload is world-readable.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RULE: never put secrets in a JWT. (If you truly need confidentiality,&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;that is a different spec: JWE — JSON Web Encryption.)&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/05_jwt_is_signed_not_encrypted.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_tampering_breaks_signature">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Tampering Breaks Signature</b><span>06_tampering_breaks_signature.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The whole point of the signature is INTEGRITY: if even a single byte of the
+header or payload changes, verification must fail.</p>
+<p>This script demonstrates an attack and its defeat:
+  1. Issue a legit token for a normal user (role='user').
+  2. Decode the payload, change role -&gt; 'admin' (privilege escalation attempt).
+  3. Re-encode the modified payload and reassemble a forged token, reusing the
+     ORIGINAL signature (the attacker doesn't know the secret, so they can't
+     compute a new valid signature).
+  4. Verify the forged token with the real secret -&gt; InvalidSignatureError.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_tampering_breaks_signature.py</span></div><pre>Original token (role=user):
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoibWFsbG9yeSIsInJvbGUiOiJ1c2VyIn0.Kbhd40M2jyfSHsjTT_SqtNC0smVUDKPpF_CqEkjHm5E
+
+Decoded payload: {&#x27;user&#x27;: &#x27;mallory&#x27;, &#x27;role&#x27;: &#x27;user&#x27;}
+Tampered payload: {&#x27;user&#x27;: &#x27;mallory&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+
+Forged token (role=admin, but signature is now stale):
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoibWFsbG9yeSIsInJvbGUiOiJhZG1pbiJ9.Kbhd40M2jyfSHsjTT_SqtNC0smVUDKPpF_CqEkjHm5E
+
+============================================================
+VERIFYING THE FORGED TOKEN WITH THE REAL SECRET
+============================================================
+InvalidSignatureError raised — tampering DETECTED and rejected. ✅
+
+The signature was computed over the ORIGINAL header.payload. Because
+the payload changed and the attacker can&#x27;t recompute a valid MAC
+without the secret, verification fails. Integrity wins.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_tampering_breaks_signature.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">06 · Tampering breaks the signature</span>
+<span class="sd">===================================</span>
+
+<span class="sd">The whole point of the signature is INTEGRITY: if even a single byte of the</span>
+<span class="sd">header or payload changes, verification must fail.</span>
+
+<span class="sd">This script demonstrates an attack and its defeat:</span>
+<span class="sd">  1. Issue a legit token for a normal user (role=&#39;user&#39;).</span>
+<span class="sd">  2. Decode the payload, change role -&gt; &#39;admin&#39; (privilege escalation attempt).</span>
+<span class="sd">  3. Re-encode the modified payload and reassemble a forged token, reusing the</span>
+<span class="sd">     ORIGINAL signature (the attacker doesn&#39;t know the secret, so they can&#39;t</span>
+<span class="sd">     compute a new valid signature).</span>
+<span class="sd">  4. Verify the forged token with the real secret -&gt; InvalidSignatureError.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;server-side-secret-attacker-does-not-know&quot;</span>
+
+<span class="c1"># --- Step 1: a legitimate, low-privilege token -------------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;mallory&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="n">header_seg</span><span class="p">,</span> <span class="n">payload_seg</span><span class="p">,</span> <span class="n">signature_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Original token (role=user):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_decode</span><span class="p">(</span><span class="n">segment</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">((</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">))</span> <span class="o">%</span> <span class="mi">4</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_encode</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="c1"># base64url with the &#39;=&#39; padding stripped, exactly like JWT segments.</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64encode</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;=&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># --- Step 2: attacker edits the payload --------------------------------------</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">b64url_decode</span><span class="p">(</span><span class="n">payload_seg</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decoded payload: </span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">payload</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;admin&quot;</span>  <span class="c1"># privilege escalation attempt!</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tampered payload: </span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Step 3: reassemble a forged token (old signature reused) ----------------</span>
+<span class="c1"># json.dumps with compact separators to mimic the original encoding style.</span>
+<span class="n">forged_payload_seg</span> <span class="o">=</span> <span class="n">b64url_encode</span><span class="p">(</span>
+    <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">separators</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;:&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+<span class="p">)</span>
+<span class="n">forged_token</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header_seg</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">forged_payload_seg</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">signature_seg</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Forged token (role=admin, but signature is now stale):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">forged_token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Step 4: verification fails ----------------------------------------------</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;VERIFYING THE FORGED TOKEN WITH THE REAL SECRET&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged_token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;BUG: forged token was accepted (should never happen)!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;InvalidSignatureError raised — tampering DETECTED and rejected. ✅&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;The signature was computed over the ORIGINAL header.payload. Because&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;the payload changed and the attacker can&#39;t recompute a valid MAC&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;without the secret, verification fails. Integrity wins.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/06_tampering_breaks_signature.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_get_unverified_header">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Get Unverified Header</b><span>07_get_unverified_header.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Sometimes you need to look at the JOSE header BEFORE you can verify the token —
+most importantly to read:
+  * 'alg' — which algorithm was used (so you know how to verify), and
+  * 'kid' — the Key ID, telling you WHICH public key to fetch from a JWKS.</p>
+<p>PyJWT exposes <code>jwt.get_unverified_header(token)</code> for exactly this. It only
+parses the header segment; it does NOT verify the signature.</p>
+<p>As always: anything "unverified" is a HINT used to set up verification, never a
+trust decision by itself.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_get_unverified_header.py</span></div><pre>============================================================
+THE TOKEN
+============================================================
+eyJhbGciOiJIUzI1NiIsImtpZCI6ImtleS0yMDI0LTA5IiwidHlwIjoiSldUIn0.eyJ1c2VyIjoiYWxpY2UifQ.oHu2bBYB3qLCNXFxSNiaja7Kfj4ncrcWR0nwy3XP874
+
+============================================================
+get_unverified_header(token)
+============================================================
+Full header dict: {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;kid&#x27;: &#x27;key-2024-09&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+  alg -&gt; HS256   (algorithm used to sign)
+  typ -&gt; JWT   (media type, usually &#x27;JWT&#x27;)
+  kid -&gt; key-2024-09   (which key signed it; used to look up a key)
+
+============================================================
+TYPICAL FLOW IN REAL SYSTEMS
+============================================================
+1. get_unverified_header(token) -&gt; read &#x27;kid&#x27; and &#x27;alg&#x27;.
+2. Use &#x27;kid&#x27; to fetch the matching public key from a JWKS endpoint.
+3. jwt.decode(token, that_key, algorithms=[expected_alg]) -&gt; VERIFY.
+
+The header read is unverified, but step 3 (with the real key) is where
+trust is actually established.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_get_unverified_header.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · Reading the header with get_unverified_header</span>
+<span class="sd">==================================================</span>
+
+<span class="sd">Sometimes you need to look at the JOSE header BEFORE you can verify the token —</span>
+<span class="sd">most importantly to read:</span>
+<span class="sd">  * &#39;alg&#39; — which algorithm was used (so you know how to verify), and</span>
+<span class="sd">  * &#39;kid&#39; — the Key ID, telling you WHICH public key to fetch from a JWKS.</span>
+
+<span class="sd">PyJWT exposes `jwt.get_unverified_header(token)` for exactly this. It only</span>
+<span class="sd">parses the header segment; it does NOT verify the signature.</span>
+
+<span class="sd">As always: anything &quot;unverified&quot; is a HINT used to set up verification, never a</span>
+<span class="sd">trust decision by itself.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-at-least-32-bytes-long!!&quot;</span>
+
+<span class="c1"># We can attach custom header fields via the `headers=` argument to encode().</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+    <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span>
+    <span class="n">SECRET</span><span class="p">,</span>
+    <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-2024-09&quot;</span><span class="p">},</span>  <span class="c1"># pretend this names a signing key</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE TOKEN&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;get_unverified_header(token)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Full header dict: </span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  alg -&gt; </span><span class="si">{</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;alg&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">   (algorithm used to sign)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  typ -&gt; </span><span class="si">{</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;typ&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">   (media type, usually &#39;JWT&#39;)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  kid -&gt; </span><span class="si">{</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">   (which key signed it; used to look up a key)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TYPICAL FLOW IN REAL SYSTEMS&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1. get_unverified_header(token) -&gt; read &#39;kid&#39; and &#39;alg&#39;.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2. Use &#39;kid&#39; to fetch the matching public key from a JWKS endpoint.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;3. jwt.decode(token, that_key, algorithms=[expected_alg]) -&gt; VERIFY.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;The header read is unverified, but step 3 (with the real key) is where&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;trust is actually established.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/07_get_unverified_header.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_encode_decode_roundtrip">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Encode Decode Roundtrip</b><span>08_encode_decode_roundtrip.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Putting it all together: the simplest complete life cycle of a JWT.</p>
+<p>ENCODE:  dict of claims  + secret + algorithm  -&gt;  compact token string
+  DECODE:  token string    + secret + algorithms -&gt;  dict of claims back</p>
+<p>This script prints each stage so you can watch the data transform and return
+unchanged, proving the round trip is lossless when the secret matches.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_encode_decode_roundtrip.py</span></div><pre>============================================================
+STAGE 1 — original claims (a plain Python dict)
+============================================================
+{&#x27;user&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;, &#x27;count&#x27;: 3}
+
+============================================================
+STAGE 2 — encoded token (str)
+============================================================
+type  : str
+value : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UiLCJyb2xlIjoiYWRtaW4iLCJjb3VudCI6M30.FhIPSirKiDu6U0UXzeWslFws1s7J2XU2EkcCAxGtSnE
+
+============================================================
+STAGE 3 — decoded claims (back to a dict)
+============================================================
+type  : dict
+value : {&#x27;user&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;, &#x27;count&#x27;: 3}
+
+============================================================
+STAGE 4 — round-trip check
+============================================================
+original == decoded ? True
+
+That&#x27;s the core loop you&#x27;ll use everywhere: encode to hand a token out,
+decode (with the same secret + pinned algorithm) to read it back safely.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_encode_decode_roundtrip.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · Full encode -&gt; decode round trip (HS256)</span>
+<span class="sd">=============================================</span>
+
+<span class="sd">Putting it all together: the simplest complete life cycle of a JWT.</span>
+
+<span class="sd">  ENCODE:  dict of claims  + secret + algorithm  -&gt;  compact token string</span>
+<span class="sd">  DECODE:  token string    + secret + algorithms -&gt;  dict of claims back</span>
+
+<span class="sd">This script prints each stage so you can watch the data transform and return</span>
+<span class="sd">unchanged, proving the round trip is lossless when the secret matches.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;round-trip-secret-at-least-32-bytes-long&quot;</span>
+
+<span class="c1"># --- Stage 1: the claims we want to put in the token -------------------------</span>
+<span class="n">original_claims</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;count&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STAGE 1 — original claims (a plain Python dict)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">original_claims</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Stage 2: encode -&gt; a compact token string -------------------------------</span>
+<span class="c1"># In PyJWT 2.x, encode() returns a `str` (not bytes). algorithm= is singular.</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">original_claims</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STAGE 2 — encoded token (str)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;type  : </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;value : </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Stage 3: decode -&gt; claims dict back -------------------------------------</span>
+<span class="c1"># On decode, algorithms= is a REQUIRED list naming the algorithm(s) you accept.</span>
+<span class="n">decoded_claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STAGE 3 — decoded claims (back to a dict)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;type  : </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">decoded_claims</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;value : </span><span class="si">{</span><span class="n">decoded_claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Stage 4: confirm the round trip is lossless -----------------------------</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STAGE 4 — round-trip check&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;original == decoded ? </span><span class="si">{</span><span class="n">original_claims</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">decoded_claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;That&#39;s the core loop you&#39;ll use everywhere: encode to hand a token out,&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;decode (with the same secret + pinned algorithm) to read it back safely.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/01-foundations/08_encode_decode_roundtrip.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="../index.html"><div class="dir">← Back</div><div class="ttl">Home</div></a><a class="next" href="02-getting-started-hs256.html"><div class="dir">Next →</div><div class="ttl">02 · Module 02 · Getting Started with HS256</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

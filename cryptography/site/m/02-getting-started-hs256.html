@@ -1,0 +1,1070 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 02 · Getting Started with HS256 · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html" class="active"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>02 · Module 02 · Getting Started with HS256</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#a78bfa,#7c3aed)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#a78bfa;border-color:#a78bfa55;background:#a78bfa11">Module 02</span>
+  <h1 style="margin-top:18px">Module 02 · Getting Started with HS256</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>HS256 is the <strong>shared-secret</strong> workhorse, and the key word is <em>symmetric</em>: the <strong>same</strong> secret both signs and verifies. There is no public half, no private half — just one key that does both jobs. That symmetry is HS256's superpower (dead simple, blazing fast) and its sharpest edge (anyone who can verify can also forge). The entire security of the scheme collapses to one question: <em>is the secret unguessable, and is it kept on the server only?</em></p>
+<p>Under the hood, <code>encode()</code> and <code>decode()</code> are mirror images of one HMAC computation. <code>encode()</code> builds the <code>header.payload</code> string and computes <code>HMAC_SHA256(secret, "header.payload")</code>, attaching the result as the signature. <code>decode()</code> does <strong>not</strong> "decrypt" anything — it re-runs the <em>exact same</em> HMAC over the received <code>header.payload</code> and compares its result to the signature that came in, byte-for-byte (using a constant-time comparison to resist timing attacks). Match → claims returned. Mismatch → <code>InvalidSignatureError</code>. Verification is just <em>re-signing and comparing</em>.</p>
+<p>Two PyJWT 2.x details trip people up. First, <code>encode()</code> returns a <strong><code>str</code></strong>, not <code>bytes</code> — so the old <code>token.decode('utf-8')</code> line from 1.x tutorials crashes. Second, <code>decode()</code> <strong>requires</strong> <code>algorithms=[...]</code>. This isn't bureaucratic; it's a security boundary. If PyJWT trusted the token's own <code>alg</code> header, an attacker could set <code>alg: none</code> or swap algorithms to bypass verification. The allow-list says "I will only accept these algorithms" <em>before</em> looking at the token.</p>
+<p>Secrets are bytes to HMAC. A <code>str</code> secret is UTF-8 encoded internally, so <code>"abc"</code> and <code>b"abc"</code> are the <em>same</em> key. But a real secret should be high-entropy random bytes (≥ 32 for HS256, matching SHA-256's output). PyJWT 2.13 actively nudges you: a key shorter than the hash size triggers an <code>InsecureKeyLengthWarning</code>, because short keys are brute-forceable offline.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>HS256 is a <strong>shared house key cut from a secret pattern</strong>. Everyone trusted gets an identical copy. To check a guest's key you don't inspect it — you try it in the lock (re-compute the HMAC) and see if it turns. Because the key both <em>opens</em> and <em>could be copied to make new keys</em>, you'd never hand it to a stranger at the door. Keep it inside the house.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>jwt.encode({"user": "alice"}, secret, algorithm="HS256")</code> serializes claims, builds <code>header.payload</code>, and computes the HMAC-SHA256 using the UTF-8 bytes of the secret.</li>
+<li>The digest is base64url-encoded and appended; a single <code>str</code> token is returned.</li>
+<li><code>jwt.decode(token, secret, algorithms=["HS256"])</code> re-splits the token and <strong>recomputes</strong> the HMAC over the received <code>header.payload</code>.</li>
+<li>PyJWT compares the freshly computed signature to the token's signature in constant time.</li>
+<li>On a match it returns the claims dict; on any mismatch (wrong secret, tampering) it raises <code>InvalidSignatureError</code>.</li>
+<li>Omitting <code>algorithms=</code> raises <code>DecodeError</code> — the call refuses to guess which algorithm to trust.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li><code>03_str_vs_bytes.py</code> shows <code>encode()</code> returns a <code>str</code>, and that a <code>str</code> and <code>bytes</code> secret with the same characters verify each other — UTF-8 makes them identical keys.</li>
+<li><code>04_wrong_secret_fails.py</code> produces <code>InvalidSignatureError</code> even though the token is perfectly well-formed — the signature simply doesn't match.</li>
+<li><code>05_must_specify_algorithms.py</code> fails loudly without <code>algorithms=</code>, making the security requirement impossible to forget.</li>
+<li><code>07_secret_strength.py</code> generates 32-byte secrets via <code>secrets.token_urlsafe</code>/<code>token_hex</code>/<code>os.urandom</code>; weak words would invite offline brute force.</li>
+<li><code>08_full_login_simulation.py</code> ties it together: issue on "login", verify on each "request" — the real-world loop.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li>❌ "<code>decode()</code> decrypts the token." False — it <strong>re-computes the HMAC and compares</strong>. Nothing is decrypted.</li>
+<li>❌ "<code>encode()</code> returns bytes, so I should call <code>.decode('utf-8')</code>." False in PyJWT 2.x — it already returns <code>str</code>.</li>
+<li>❌ "<code>algorithms=</code> is optional boilerplate." False — it's mandatory and your defense against <code>alg=none</code> and algorithm-confusion attacks.</li>
+<li>❌ "Any string works as a secret." False — short/guessable keys are forgeable; PyJWT 2.13 even warns with <code>InsecureKeyLengthWarning</code> for keys under the hash size.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-02-getting-started-with-hs256">🚀 Module 02 · Getting Started with HS256</h1>
+<blockquote>
+<p>You understand what a JWT <em>is</em> (Module 01). Now let's actually <strong>use</strong> one.
+This module is your hands-on introduction to issuing and verifying tokens with
+<strong>HS256</strong> — the shared-secret workhorse of JWT signing.</p>
+</blockquote>
+<hr />
+<h2 id="what-youll-learn">🎯 What you'll learn</h2>
+<p><strong>HS256</strong> = <strong>H</strong>MAC with <strong>S</strong>HA-<strong>256</strong>. It's a <em>symmetric</em> algorithm: the
+<strong>same secret</strong> both signs and verifies a token. It's simple, fast, and perfect
+when one party (or a set of trusted services sharing a secret) issues <em>and</em>
+checks tokens.</p>
+<p>You'll learn the two core calls and the habits that keep them safe:</p>
+<div class="codehl"><pre><span></span><code><span class="n">token</span>  <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>   <span class="c1"># issue</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>            <span class="c1"># verify</span>
+</code></pre></div>
+
+<p>…plus <code>str</code> vs <code>bytes</code>, why <code>algorithms=</code> is mandatory, what value types a
+payload accepts, how to generate a <em>strong</em> secret, and a tiny end-to-end login.</p>
+<hr />
+<h2 id="the-hs256-issueverify-loop">🔄 The HS256 issue/verify loop</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">sequenceDiagram
+    participant Client
+    participant Server
+    Note over Server: knows SECRET
+    Client-&gt;&gt;Server: POST /login (username, password)
+    Server-&gt;&gt;Server: jwt.encode(claims, SECRET, HS256)
+    Server--&gt;&gt;Client: access token (str)
+    Client-&gt;&gt;Server: GET /protected (Authorization: Bearer token)
+    Server-&gt;&gt;Server: jwt.decode(token, SECRET, algorithms=[HS256])
+    alt signature valid
+        Server--&gt;&gt;Client: 200 OK + greeting
+    else invalid / expired / tampered
+        Server--&gt;&gt;Client: 401 Unauthorized
+    end</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_first_encode">01_first_encode.py</a></td>
+<td>Issue your first token with <code>encode()</code></td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/01_first_encode.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_first_decode">02_first_decode.py</a></td>
+<td>Verify &amp; read it back with <code>decode()</code></td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/02_first_decode.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_str_vs_bytes">03_str_vs_bytes.py</a></td>
+<td><code>encode()</code> returns <code>str</code>; <code>str</code> vs <code>bytes</code> secrets</td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/03_str_vs_bytes.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_wrong_secret_fails">04_wrong_secret_fails.py</a></td>
+<td>Wrong secret → <code>InvalidSignatureError</code></td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/04_wrong_secret_fails.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_must_specify_algorithms">05_must_specify_algorithms.py</a></td>
+<td>Why <code>algorithms=</code> is required</td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/05_must_specify_algorithms.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_payload_types">06_payload_types.py</a></td>
+<td>Allowed value types; <code>datetime</code> for date claims</td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/06_payload_types.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_secret_strength">07_secret_strength.py</a></td>
+<td>Generate strong secrets; HMAC entropy needs</td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/07_secret_strength.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_full_login_simulation">08_full_login_simulation.py</a></td>
+<td>A complete issue-then-verify login flow</td>
+<td><code>.venv/bin/python pyjwt-course/02-getting-started-hs256/08_full_login_simulation.py</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ol>
+<li><strong>Two calls do everything.</strong> <code>encode()</code> issues, <code>decode()</code> verifies + reads.</li>
+<li><strong><code>encode()</code> returns <code>str</code></strong> in PyJWT 2.x (it was <code>bytes</code> in 1.x — beware old
+   tutorials that call <code>.decode('utf-8')</code> on the result).</li>
+<li><strong>Secrets can be <code>str</code> or <code>bytes</code></strong> — a <code>str</code> is UTF-8 encoded internally, so
+   <code>"abc"</code> and <code>b"abc"</code> are the same key. Be consistent.</li>
+<li><strong>Always pin <code>algorithms=[...]</code></strong> on decode. It's required <em>and</em> it's your
+   defense against <code>alg=none</code> and algorithm-confusion attacks.</li>
+<li><strong>Secret strength is everything.</strong> HS256 is only as strong as its key — use
+   ≥ 32 random bytes from <code>secrets</code>/<code>os.urandom</code>.</li>
+</ol>
+<hr />
+<h2 id="common-pitfalls">⚠️ Common pitfalls</h2>
+<ul>
+<li>❌ <strong>Copy-pasting <code>token.decode('utf-8')</code></strong> from a PyJWT 1.x guide → crashes,
+  because <code>encode()</code> already returns <code>str</code>.</li>
+<li>❌ <strong>Weak/guessable secrets</strong> (<code>"secret"</code>, <code>"password123"</code>) → tokens forgeable
+  via offline brute force. The HMAC math can't save a bad key.</li>
+<li>❌ <strong>Deriving <code>algorithms=</code> from the token's own header</strong> → reintroduces the
+  exact attack the allow-list exists to prevent.</li>
+<li>❌ <strong>Putting the verify secret on the client.</strong> With HS256 the secret both
+  signs <em>and</em> verifies — anyone who has it can forge tokens. Keep it server-side
+  only. (Need clients to verify without forging? That's asymmetric signing —
+  RSA/ECDSA/EdDSA, coming in later modules.)</li>
+</ul>
+<hr />
+<h2 id="next-up">➡️ Next up</h2>
+<p><strong>Module 03 · Registered claims</strong> — <code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code>, <code>nbf</code>, <code>iat</code>,
+<code>jti</code>, and how PyJWT validates them automatically.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_first_encode" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>First Encode</b><span>01_first_encode.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The most basic JWT operation: turn a dictionary of claims into a signed token
+string using a shared secret and the HS256 algorithm.</p>
+<p>jwt.encode(payload, key, algorithm="HS256")</p>
+<ul>
+<li>payload   — a dict of claims (your data).</li>
+<li>key       — the shared secret only your server knows.</li>
+<li>algorithm — how to sign. "HS256" = HMAC with SHA-256 (symmetric).</li>
+</ul>
+<p>In PyJWT 2.x, encode() returns a <code>str</code> you can send to a client.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_first_encode.py</span></div><pre>============================================================
+ENCODING A TOKEN
+============================================================
+payload   : {&#x27;user&#x27;: &#x27;alice&#x27;}
+algorithm : HS256 (HMAC-SHA256)
+
+token     : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.BFbb7Qtp1_56ogp9vc5xkqb9X12ymEHqgng-bmJPq40
+token type: str  (a str in PyJWT 2.x)
+
+That&#x27;s it — you&#x27;ve issued your first JWT. The next script reads it back.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_first_encode.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">01 · Your first encode</span>
+<span class="sd">======================</span>
+
+<span class="sd">The most basic JWT operation: turn a dictionary of claims into a signed token</span>
+<span class="sd">string using a shared secret and the HS256 algorithm.</span>
+
+<span class="sd">  jwt.encode(payload, key, algorithm=&quot;HS256&quot;)</span>
+
+<span class="sd">  * payload   — a dict of claims (your data).</span>
+<span class="sd">  * key       — the shared secret only your server knows.</span>
+<span class="sd">  * algorithm — how to sign. &quot;HS256&quot; = HMAC with SHA-256 (symmetric).</span>
+
+<span class="sd">In PyJWT 2.x, encode() returns a `str` you can send to a client.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># In real life this comes from config/secrets, never hard-coded like this.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;change-me-to-a-real-secret-min-32-bytes!&quot;</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ENCODING A TOKEN&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">}</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;payload   : </span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;algorithm : HS256 (HMAC-SHA256)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token     : </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token type: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">  (a str in PyJWT 2.x)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;That&#39;s it — you&#39;ve issued your first JWT. The next script reads it back.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/01_first_encode.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_first_decode">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>First Decode</b><span>02_first_decode.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Decoding verifies the signature AND returns the claims. You must supply:</p>
+<p>jwt.decode(token, key, algorithms=["HS256"])</p>
+<ul>
+<li>token      — the compact JWT string.</li>
+<li>key        — the SAME shared secret used to sign it.</li>
+<li>algorithms — a list of algorithms you are willing to accept. REQUIRED.</li>
+</ul>
+<p>If the signature checks out, you get the original claims dict back. If anything
+is wrong (bad secret, tampered token, disallowed algorithm), decode() raises.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_first_decode.py</span></div><pre>Token to decode:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.BFbb7Qtp1_56ogp9vc5xkqb9X12ymEHqgng-bmJPq40
+
+============================================================
+DECODING + VERIFYING
+============================================================
+Verified claims: {&#x27;user&#x27;: &#x27;alice&#x27;}
+claims type    : dict
+
+Because the secret matched and the signature was valid, PyJWT returned
+the original payload. Decoding both VERIFIES and DESERIALIZES in one call.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_first_decode.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">02 · Your first decode</span>
+<span class="sd">======================</span>
+
+<span class="sd">Decoding verifies the signature AND returns the claims. You must supply:</span>
+
+<span class="sd">  jwt.decode(token, key, algorithms=[&quot;HS256&quot;])</span>
+
+<span class="sd">  * token      — the compact JWT string.</span>
+<span class="sd">  * key        — the SAME shared secret used to sign it.</span>
+<span class="sd">  * algorithms — a list of algorithms you are willing to accept. REQUIRED.</span>
+
+<span class="sd">If the signature checks out, you get the original claims dict back. If anything</span>
+<span class="sd">is wrong (bad secret, tampered token, disallowed algorithm), decode() raises.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;change-me-to-a-real-secret-min-32-bytes!&quot;</span>
+
+<span class="c1"># First, issue a token (same as script 01).</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Token to decode:</span><span class="se">\n</span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DECODING + VERIFYING&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="c1"># algorithms=[&quot;HS256&quot;] tells PyJWT exactly which algorithm is allowed.</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Verified claims: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;claims type    : </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">claims</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Because the secret matched and the signature was valid, PyJWT returned&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;the original payload. Decoding both VERIFIES and DESERIALIZES in one call.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/02_first_decode.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_str_vs_bytes">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Str Vs Bytes</b><span>03_str_vs_bytes.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Two small-but-important PyJWT 2.x facts:</p>
+<ol>
+<li>encode() returns a <code>str</code> (in PyJWT 1.x it returned <code>bytes</code> — a common
+     source of confusion when reading old tutorials).</li>
+<li>The SECRET KEY may be passed as either a <code>str</code> or <code>bytes</code>. PyJWT encodes a
+     str key to UTF-8 bytes internally, so both forms produce/verify the same
+     signature — as long as you're consistent.</li>
+</ol>
+<p>This script demonstrates all of that.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_str_vs_bytes.py</span></div><pre>============================================================
+FACT 1 — encode() returns str
+============================================================
+type(token) = str
+Confirmed: it&#x27;s a str. (PyJWT 1.x returned bytes — old guides may differ.)
+
+============================================================
+FACT 2 — secret key can be str OR bytes
+============================================================
+token signed with str secret  : eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.TGcnmbqmDkEWAfFhNYwJJUUVySUSXc18gf_G3E0-kJ8
+token signed with bytes secret: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.TGcnmbqmDkEWAfFhNYwJJUUVySUSXc18gf_G3E0-kJ8
+identical tokens? True
+
+Cross-verify: decode the str-signed token using the BYTES secret...
+  decoded fine: {&#x27;user&#x27;: &#x27;alice&#x27;}
+...and decode the bytes-signed token using the STR secret...
+  decoded fine: {&#x27;user&#x27;: &#x27;alice&#x27;}
+
+============================================================
+WHY THIS MATTERS
+============================================================
+A &#x27;str&#x27; secret is encoded to UTF-8 bytes under the hood, so &#x27;abc&#x27; and
+b&#x27;abc&#x27; are equivalent keys. Pick one convention and stay consistent.
+Heads up: code copied from PyJWT 1.x may do token.decode(&#x27;utf-8&#x27;) on the
+result of encode() — that breaks in 2.x because it&#x27;s already a str.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_str_vs_bytes.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">03 · str vs bytes</span>
+<span class="sd">=================</span>
+
+<span class="sd">Two small-but-important PyJWT 2.x facts:</span>
+
+<span class="sd">  1. encode() returns a `str` (in PyJWT 1.x it returned `bytes` — a common</span>
+<span class="sd">     source of confusion when reading old tutorials).</span>
+<span class="sd">  2. The SECRET KEY may be passed as either a `str` or `bytes`. PyJWT encodes a</span>
+<span class="sd">     str key to UTF-8 bytes internally, so both forms produce/verify the same</span>
+<span class="sd">     signature — as long as you&#39;re consistent.</span>
+
+<span class="sd">This script demonstrates all of that.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FACT 1 — encode() returns str&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="s2">&quot;a-demo-secret-at-least-32-bytes-long!!!!&quot;</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;type(token) = </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="nb">str</span><span class="p">),</span> <span class="s2">&quot;In PyJWT 2.x, encode() must return str&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Confirmed: it&#39;s a str. (PyJWT 1.x returned bytes — old guides may differ.)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FACT 2 — secret key can be str OR bytes&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">str_secret</span> <span class="o">=</span> <span class="s2">&quot;my-shared-secret-at-least-32-bytes-long!&quot;</span>
+<span class="n">bytes_secret</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;my-shared-secret-at-least-32-bytes-long!&quot;</span>  <span class="c1"># same bytes, just a bytes literal</span>
+
+<span class="n">token_from_str</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">str_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="n">token_from_bytes</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">bytes_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed with str secret  : </span><span class="si">{</span><span class="n">token_from_str</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed with bytes secret: </span><span class="si">{</span><span class="n">token_from_bytes</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;identical tokens? </span><span class="si">{</span><span class="n">token_from_str</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">token_from_bytes</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cross-verify: decode the str-signed token using the BYTES secret...&quot;</span><span class="p">)</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_from_str</span><span class="p">,</span> <span class="n">bytes_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  decoded fine: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;...and decode the bytes-signed token using the STR secret...&quot;</span><span class="p">)</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_from_bytes</span><span class="p">,</span> <span class="n">str_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  decoded fine: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHY THIS MATTERS&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;A &#39;str&#39; secret is encoded to UTF-8 bytes under the hood, so &#39;abc&#39; and&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;b&#39;abc&#39; are equivalent keys. Pick one convention and stay consistent.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Heads up: code copied from PyJWT 1.x may do token.decode(&#39;utf-8&#39;) on the&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;result of encode() — that breaks in 2.x because it&#39;s already a str.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/03_str_vs_bytes.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_wrong_secret_fails">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Wrong Secret Fails</b><span>04_wrong_secret_fails.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>HS256 is symmetric: the SAME secret both signs and verifies. If you try to
+verify a token with the wrong secret, the recomputed HMAC won't match the
+signature in the token, and PyJWT raises <code>InvalidSignatureError</code>.</p>
+<p>This is the property that makes JWTs trustworthy: only a holder of the secret
+can produce a token that verifies.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_wrong_secret_fails.py</span></div><pre>Token (signed with the RIGHT secret):
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.FQ_RHAJHx_QRM4JsQQ8BXQ36gq3NvaN2GWzMXwCltD4
+
+============================================================
+DECODING WITH THE CORRECT SECRET
+============================================================
+Success: {&#x27;user&#x27;: &#x27;alice&#x27;}
+
+============================================================
+DECODING WITH THE WRONG SECRET
+============================================================
+InvalidSignatureError raised: Signature verification failed
+
+The verifier recomputes HMAC-SHA256(header.payload, WRONG_SECRET),
+gets a different value than the token&#x27;s signature, and rejects it.
+Only someone who knows the real secret can forge a valid token.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_wrong_secret_fails.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">04 · The wrong secret fails</span>
+<span class="sd">===========================</span>
+
+<span class="sd">HS256 is symmetric: the SAME secret both signs and verifies. If you try to</span>
+<span class="sd">verify a token with the wrong secret, the recomputed HMAC won&#39;t match the</span>
+<span class="sd">signature in the token, and PyJWT raises `InvalidSignatureError`.</span>
+
+<span class="sd">This is the property that makes JWTs trustworthy: only a holder of the secret</span>
+<span class="sd">can produce a token that verifies.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="n">RIGHT_SECRET</span> <span class="o">=</span> <span class="s2">&quot;the-correct-secret-at-least-32-bytes!!!!&quot;</span>
+<span class="n">WRONG_SECRET</span> <span class="o">=</span> <span class="s2">&quot;an-attackers-guess-at-least-32-bytes!!!!&quot;</span>
+
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">RIGHT_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Token (signed with the RIGHT secret):</span><span class="se">\n</span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DECODING WITH THE CORRECT SECRET&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">RIGHT_SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Success: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DECODING WITH THE WRONG SECRET&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">WRONG_SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;BUG: wrong secret accepted (should never happen)!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;InvalidSignatureError raised: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;The verifier recomputes HMAC-SHA256(header.payload, WRONG_SECRET),&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;gets a different value than the token&#39;s signature, and rejects it.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Only someone who knows the real secret can forge a valid token.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/04_wrong_secret_fails.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_must_specify_algorithms">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Must Specify Algorithms</b><span>05_must_specify_algorithms.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>When verifying, PyJWT requires you to pass <code>algorithms=[...]</code> — the explicit
+allow-list of algorithms you accept. This is a SECURITY feature, not a nuisance.</p>
+<p>Why pin algorithms?
+  * The 'alg' value lives in the token HEADER, which is attacker-controlled.
+  * If a verifier blindly trusted the header's 'alg', an attacker could switch
+    it (e.g. to 'none', or perform an RSA-&gt;HMAC "algorithm confusion" attack).
+  * By passing your OWN allow-list, you decide what's acceptable — the token
+    can't talk you into using a weaker/none algorithm.</p>
+<p>This script shows that omitting algorithms= raises, and that an algorithm NOT
+in your allow-list is rejected.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_must_specify_algorithms.py</span></div><pre>============================================================
+CASE 1 — omitting algorithms= entirely
+============================================================
+Rejected as expected: DecodeError: It is required that you pass in a value for the &quot;algorithms&quot; argument when calling decode().
+
+============================================================
+CASE 2 — token&#x27;s algorithm not in the allow-list
+============================================================
+Rejected as expected: InvalidAlgorithmError: The specified alg value is not allowed
+
+============================================================
+CASE 3 — correct, explicit allow-list
+============================================================
+Accepted: {&#x27;user&#x27;: &#x27;alice&#x27;}
+
+============================================================
+TAKEAWAY
+============================================================
+ALWAYS pass algorithms=[...] with the EXACT set you expect. Never derive
+it from the token&#x27;s own header. This single habit defends against
+&#x27;alg=none&#x27; and algorithm-confusion attacks.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_must_specify_algorithms.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">05 · You MUST specify algorithms= on decode</span>
+<span class="sd">===========================================</span>
+
+<span class="sd">When verifying, PyJWT requires you to pass `algorithms=[...]` — the explicit</span>
+<span class="sd">allow-list of algorithms you accept. This is a SECURITY feature, not a nuisance.</span>
+
+<span class="sd">Why pin algorithms?</span>
+<span class="sd">  * The &#39;alg&#39; value lives in the token HEADER, which is attacker-controlled.</span>
+<span class="sd">  * If a verifier blindly trusted the header&#39;s &#39;alg&#39;, an attacker could switch</span>
+<span class="sd">    it (e.g. to &#39;none&#39;, or perform an RSA-&gt;HMAC &quot;algorithm confusion&quot; attack).</span>
+<span class="sd">  * By passing your OWN allow-list, you decide what&#39;s acceptable — the token</span>
+<span class="sd">    can&#39;t talk you into using a weaker/none algorithm.</span>
+
+<span class="sd">This script shows that omitting algorithms= raises, and that an algorithm NOT</span>
+<span class="sd">in your allow-list is rejected.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-at-least-32-bytes-long!!&quot;</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CASE 1 — omitting algorithms= entirely&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="c1"># Intentionally wrong: no algorithms list supplied.</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">)</span>  <span class="c1"># type: ignore[call-arg]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unexpectedly succeeded without algorithms=!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># PyJWT raises DecodeError here</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Rejected as expected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CASE 2 — token&#39;s algorithm not in the allow-list&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="c1"># We accept only RS256, but the token is HS256 -&gt; not allowed.</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unexpectedly accepted a disallowed algorithm!&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Rejected as expected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CASE 3 — correct, explicit allow-list&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Accepted: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;TAKEAWAY&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ALWAYS pass algorithms=[...] with the EXACT set you expect. Never derive&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;it from the token&#39;s own header. This single habit defends against&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&#39;alg=none&#39; and algorithm-confusion attacks.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/05_must_specify_algorithms.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_payload_types">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Payload Types</b><span>06_payload_types.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A JWT payload is JSON, so claim VALUES must be JSON-serializable. PyJWT happily
+accepts the standard JSON types:</p>
+<ul>
+<li>str, int, float, bool, None</li>
+<li>list (array) and dict (object), nested as deep as you like</li>
+</ul>
+<p>Additionally, for the <em>date-related registered claims</em> (exp, nbf, iat), PyJWT
+lets you pass a Python <code>datetime</code> and converts it to a NumericDate (a Unix
+timestamp integer) for you. This script demonstrates both behaviours.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_payload_types.py</span></div><pre>============================================================
+STANDARD JSON VALUE TYPES IN A PAYLOAD
+============================================================
+  a_string   -&gt; &#x27;hello&#x27;                        (str)
+  an_int     -&gt; 42                             (int)
+  a_float    -&gt; 3.14                           (float)
+  a_bool     -&gt; True                           (bool)
+  a_none     -&gt; None                           (NoneType)
+  a_list     -&gt; [1, 2, &#x27;three&#x27;]                (list)
+  a_dict     -&gt; {&#x27;nested&#x27;: {&#x27;deeply&#x27;: True}}   (dict)
+
+Round-trip preserved all types (note: tuples would become lists, since
+JSON has no tuple type).
+
+============================================================
+datetime IS CONVERTED FOR DATE CLAIMS (exp, nbf, iat)
+============================================================
+passed iat as datetime: 2026-06-30 20:05:09.858490+00:00
+stored/decoded iat as : 1782849909 (int)
+passed exp as datetime: 2026-06-30 21:05:09.858490+00:00
+stored/decoded exp as : 1782853509 (int)
+
+PyJWT converts the datetime to a Unix timestamp (seconds since epoch),
+which is the JWT spec&#x27;s &#x27;NumericDate&#x27; format. On decode you get the int
+back; PyJWT uses it internally to enforce expiry (covered in module 03).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_payload_types.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">06 · Payload value types</span>
+<span class="sd">========================</span>
+
+<span class="sd">A JWT payload is JSON, so claim VALUES must be JSON-serializable. PyJWT happily</span>
+<span class="sd">accepts the standard JSON types:</span>
+
+<span class="sd">  * str, int, float, bool, None</span>
+<span class="sd">  * list (array) and dict (object), nested as deep as you like</span>
+
+<span class="sd">Additionally, for the *date-related registered claims* (exp, nbf, iat), PyJWT</span>
+<span class="sd">lets you pass a Python `datetime` and converts it to a NumericDate (a Unix</span>
+<span class="sd">timestamp integer) for you. This script demonstrates both behaviours.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-at-least-32-bytes-long!!&quot;</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STANDARD JSON VALUE TYPES IN A PAYLOAD&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;a_string&quot;</span><span class="p">:</span> <span class="s2">&quot;hello&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;an_int&quot;</span><span class="p">:</span> <span class="mi">42</span><span class="p">,</span>
+    <span class="s2">&quot;a_float&quot;</span><span class="p">:</span> <span class="mf">3.14</span><span class="p">,</span>
+    <span class="s2">&quot;a_bool&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="s2">&quot;a_none&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="s2">&quot;a_list&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;three&quot;</span><span class="p">],</span>
+    <span class="s2">&quot;a_dict&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;nested&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;deeply&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}},</span>
+<span class="p">}</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">decoded</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">:</span><span class="s2">10</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">value</span><span class="si">!r:</span><span class="s2">30</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Round-trip preserved all types (note: tuples would become lists, since&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;JSON has no tuple type).&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;datetime IS CONVERTED FOR DATE CLAIMS (exp, nbf, iat)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">tz</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">UTC</span><span class="p">)</span>
+<span class="n">exp</span> <span class="o">=</span> <span class="n">now</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">date_payload</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>  <span class="c1"># issued-at: pass a datetime...</span>
+    <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">exp</span><span class="p">,</span>  <span class="c1"># expiry: ...and PyJWT stores it as an integer timestamp</span>
+<span class="p">}</span>
+<span class="n">date_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">date_payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="n">date_decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">date_token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;passed iat as datetime: </span><span class="si">{</span><span class="n">now</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;stored/decoded iat as : </span><span class="si">{</span><span class="n">date_decoded</span><span class="p">[</span><span class="s1">&#39;iat&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">date_decoded</span><span class="p">[</span><span class="s1">&#39;iat&#39;</span><span class="p">])</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;passed exp as datetime: </span><span class="si">{</span><span class="n">exp</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;stored/decoded exp as : </span><span class="si">{</span><span class="n">date_decoded</span><span class="p">[</span><span class="s1">&#39;exp&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">date_decoded</span><span class="p">[</span><span class="s1">&#39;exp&#39;</span><span class="p">])</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PyJWT converts the datetime to a Unix timestamp (seconds since epoch),&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;which is the JWT spec&#39;s &#39;NumericDate&#39; format. On decode you get the int&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;back; PyJWT uses it internally to enforce expiry (covered in module 03).&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/06_payload_types.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_secret_strength">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Secret Strength</b><span>07_secret_strength.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>HS256 security rests ENTIRELY on the secret being unguessable. A weak secret
+(like "password" or "secret") can be brute-forced or dictionary-attacked
+offline, letting anyone forge valid tokens.</p>
+<p>Guidelines:
+  * Use a HIGH-ENTROPY random secret, not a memorable word.
+  * For HS256 (HMAC-SHA256) aim for at least 256 bits (32 bytes) of entropy —
+    matching the hash output size.
+  * Generate it with a CRYPTOGRAPHICALLY SECURE source:
+        - secrets.token_urlsafe(n)  -&gt; URL-safe text, ~1.3<em>n chars for n bytes
+        - secrets.token_hex(n)      -&gt; hex text, 2</em>n chars for n bytes
+        - os.urandom(n)             -&gt; raw random bytes
+  * NEVER use random.random()/random.choice() — those are NOT secure.</p>
+<p>This script generates strong secrets and uses one to sign a token.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_secret_strength.py</span></div><pre>============================================================
+GENERATING STRONG SECRETS (cryptographically secure)
+============================================================
+secrets.token_urlsafe(32): wRGYrJVz-s6IRL3Tpc1lS9IsMDa4CIO-5z2d01MvzfA
+  length: 43 chars
+secrets.token_hex(32)    : 0e5b159b3aa7fe054e270370d5e4e69231a152f1659d9b4688842879289c610c
+  length: 64 chars
+os.urandom(32)           : b&#x27;\xc3\x04L \x92\xffm\x07k\xd4\xddW\xed\x89P|\\A@\xa1J\xb4\x84\x8c\xbe\x08\xbf\t\x17\x17\xdc\x9a&#x27;
+  length: 32 bytes
+
+============================================================
+USING A STRONG SECRET TO SIGN
+============================================================
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWxpY2UifQ.T43DyM4xfYOa6Qn6AVPCJhk0zvlznxwe74wV4Q97Wkk
+verified: {&#x27;user&#x27;: &#x27;alice&#x27;}
+
+============================================================
+ENTROPY MATTERS — DON&#x27;T DO THIS
+============================================================
+A weak secret like &#x27;secret&#x27; is in every wordlist; tokens signed with it
+can be forged via offline brute force. The math of HMAC is strong, but
+it can&#x27;t protect a guessable key.
+Rule: &gt;= 32 random bytes, from `secrets`/`os.urandom`, stored outside code.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_secret_strength.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · Secret strength for HMAC</span>
+<span class="sd">=============================</span>
+
+<span class="sd">HS256 security rests ENTIRELY on the secret being unguessable. A weak secret</span>
+<span class="sd">(like &quot;password&quot; or &quot;secret&quot;) can be brute-forced or dictionary-attacked</span>
+<span class="sd">offline, letting anyone forge valid tokens.</span>
+
+<span class="sd">Guidelines:</span>
+<span class="sd">  * Use a HIGH-ENTROPY random secret, not a memorable word.</span>
+<span class="sd">  * For HS256 (HMAC-SHA256) aim for at least 256 bits (32 bytes) of entropy —</span>
+<span class="sd">    matching the hash output size.</span>
+<span class="sd">  * Generate it with a CRYPTOGRAPHICALLY SECURE source:</span>
+<span class="sd">        - secrets.token_urlsafe(n)  -&gt; URL-safe text, ~1.3*n chars for n bytes</span>
+<span class="sd">        - secrets.token_hex(n)      -&gt; hex text, 2*n chars for n bytes</span>
+<span class="sd">        - os.urandom(n)             -&gt; raw random bytes</span>
+<span class="sd">  * NEVER use random.random()/random.choice() — those are NOT secure.</span>
+
+<span class="sd">This script generates strong secrets and uses one to sign a token.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">secrets</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GENERATING STRONG SECRETS (cryptographically secure)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="c1"># 32 bytes = 256 bits of entropy, a good match for SHA-256.</span>
+<span class="n">urlsafe_secret</span> <span class="o">=</span> <span class="n">secrets</span><span class="o">.</span><span class="n">token_urlsafe</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+<span class="n">hex_secret</span> <span class="o">=</span> <span class="n">secrets</span><span class="o">.</span><span class="n">token_hex</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+<span class="n">raw_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">urandom</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>  <span class="c1"># bytes, also usable directly as a key</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;secrets.token_urlsafe(32): </span><span class="si">{</span><span class="n">urlsafe_secret</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  length: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">urlsafe_secret</span><span class="p">)</span><span class="si">}</span><span class="s2"> chars&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;secrets.token_hex(32)    : </span><span class="si">{</span><span class="n">hex_secret</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  length: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hex_secret</span><span class="p">)</span><span class="si">}</span><span class="s2"> chars&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;os.urandom(32)           : </span><span class="si">{</span><span class="n">raw_secret</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  length: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw_secret</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;USING A STRONG SECRET TO SIGN&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">urlsafe_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token: </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">urlsafe_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;verified: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ENTROPY MATTERS — DON&#39;T DO THIS&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">weak</span> <span class="o">=</span> <span class="s2">&quot;secret&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;A weak secret like </span><span class="si">{</span><span class="n">weak</span><span class="si">!r}</span><span class="s2"> is in every wordlist; tokens signed with it&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;can be forged via offline brute force. The math of HMAC is strong, but&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;it can&#39;t protect a guessable key.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Rule: &gt;= 32 random bytes, from `secrets`/`os.urandom`, stored outside code.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/07_secret_strength.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_full_login_simulation">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Full Login Simulation</b><span>08_full_login_simulation.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Time to tie module 02 together with a realistic mini-flow:</p>
+<p>LOGIN:   user authenticates -&gt; server issues a signed JWT ("access token").
+  REQUEST: user later presents the token -&gt; server verifies it and greets them.</p>
+<p>No web framework, no network — just the JWT mechanics you've learned, wrapped
+in functions that mimic a login endpoint and a protected endpoint.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_full_login_simulation.py</span></div><pre>============================================================
+STEP 1 — alice logs in
+============================================================
+Issued access token:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTc4Mjg0OTkxMCwiZXhwIjoxNzgyODUwODEwfQ.rYJzBsU4lPzKYV3Y8NJYMYdzQuvBt1OY72wAxHpTerw
+
+============================================================
+STEP 2 — alice calls a protected endpoint with her token
+============================================================
+Hello, alice! Your token is valid. 👋
+
+============================================================
+STEP 3 — a bad login is rejected
+============================================================
+Login refused: invalid username or password
+
+============================================================
+STEP 4 — a tampered/garbage token is rejected at the endpoint
+============================================================
+Endpoint refused token: InvalidSignatureError: Signature verification failed
+
+That&#x27;s the essence of token-based auth: issue on login, verify on every
+request. Modules ahead add claim validation, asymmetric keys, and more.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_full_login_simulation.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · A tiny login simulation</span>
+<span class="sd">============================</span>
+
+<span class="sd">Time to tie module 02 together with a realistic mini-flow:</span>
+
+<span class="sd">  LOGIN:   user authenticates -&gt; server issues a signed JWT (&quot;access token&quot;).</span>
+<span class="sd">  REQUEST: user later presents the token -&gt; server verifies it and greets them.</span>
+
+<span class="sd">No web framework, no network — just the JWT mechanics you&#39;ve learned, wrapped</span>
+<span class="sd">in functions that mimic a login endpoint and a protected endpoint.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidTokenError</span>
+
+<span class="c1"># The server&#39;s signing secret. In production: load from env/secret manager.</span>
+<span class="n">SERVER_SECRET</span> <span class="o">=</span> <span class="s2">&quot;server-only-hmac-secret-keep-safe&quot;</span>
+<span class="n">ALGORITHM</span> <span class="o">=</span> <span class="s2">&quot;HS256&quot;</span>
+
+<span class="c1"># A pretend user database (username -&gt; password). Never store plaintext</span>
+<span class="c1"># passwords in real life — hash them. This is illustrative only.</span>
+<span class="n">USERS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;alice&quot;</span><span class="p">:</span> <span class="s2">&quot;wonderland&quot;</span><span class="p">,</span> <span class="s2">&quot;bob&quot;</span><span class="p">:</span> <span class="s2">&quot;builder&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">login</span><span class="p">(</span><span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">password</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Authenticate a user and return a signed access token.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">USERS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">username</span><span class="p">)</span> <span class="o">!=</span> <span class="n">password</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;invalid username or password&quot;</span><span class="p">)</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">tz</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="n">username</span><span class="p">,</span>                       <span class="c1"># subject: who the token is about</span>
+        <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>                            <span class="c1"># issued-at</span>
+        <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">15</span><span class="p">),</span>  <span class="c1"># short-lived token</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SERVER_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="n">ALGORITHM</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">protected_greeting</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verify a presented token and return a personalized greeting.&quot;&quot;&quot;</span>
+    <span class="c1"># Verifies signature AND expiry; pins the algorithm.</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SERVER_SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="n">ALGORITHM</span><span class="p">])</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Hello, </span><span class="si">{</span><span class="n">claims</span><span class="p">[</span><span class="s1">&#39;sub&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">! Your token is valid. 👋&quot;</span>
+
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 — alice logs in&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="n">access_token</span> <span class="o">=</span> <span class="n">login</span><span class="p">(</span><span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;wonderland&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Issued access token:</span><span class="se">\n</span><span class="si">{</span><span class="n">access_token</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 — alice calls a protected endpoint with her token&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">protected_greeting</span><span class="p">(</span><span class="n">access_token</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3 — a bad login is rejected&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">login</span><span class="p">(</span><span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;wrong-password&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Login refused: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 4 — a tampered/garbage token is rejected at the endpoint&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">protected_greeting</span><span class="p">(</span><span class="n">access_token</span> <span class="o">+</span> <span class="s2">&quot;tampered&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Endpoint refused token: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;That&#39;s the essence of token-based auth: issue on login, verify on every&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;request. Modules ahead add claim validation, asymmetric keys, and more.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/02-getting-started-hs256/08_full_login_simulation.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="01-foundations.html"><div class="dir">← Previous</div><div class="ttl">01 · Module 01 · Foundations — What a JWT actually is</div></a><a class="next" href="03-registered-claims.html"><div class="dir">Next →</div><div class="ttl">03 · Module 03 · Registered Claims</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

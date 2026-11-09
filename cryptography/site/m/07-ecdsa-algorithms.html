@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K) · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html" class="active"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>07 · Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#f87171,#dc2626)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#f87171;border-color:#f8717155;background:#f8717111">Module 07</span>
+  <h1 style="margin-top:18px">Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>ECDSA swaps RSA's "factoring is hard" trapdoor for a different one: the <strong>elliptic-curve discrete logarithm problem</strong>. Picture a fixed point <code>G</code> on a curve and an operation that lets you "add" the point to itself many times. Your private key is a secret integer <code>d</code>; your public key is the point <code>Q = d·G</code>. Computing <code>Q</code> from <code>d</code> is fast, but recovering <code>d</code> from <code>Q</code> — undoing all those additions — is infeasible. The astonishing payoff is <strong>size</strong>: a 256-bit elliptic-curve key delivers roughly the same security as a 3072-bit RSA key, so keys, signatures, and therefore tokens all shrink dramatically.</p>
+<p>The catch that trips up everyone is that <strong>each <code>ES*</code> algorithm is welded to exactly one curve and one hash</strong>. <code>ES256</code> means P-256 (<code>SECP256R1</code>) with SHA-256; <code>ES384</code> means P-384 with SHA-384; <code>ES512</code> means SHA-512 over <strong>P-521</strong> — <em>not</em> "P-512", which doesn't exist; and <code>ES256K</code> means the Bitcoin/Ethereum Koblitz curve <code>secp256k1</code> with SHA-256. You cannot mix a key on one curve with an algorithm expecting another — PyJWT raises <code>InvalidKeyError</code>.</p>
+<p>There's a sharp security edge hiding in the signing step. Every ECDSA signature <code>(r, s)</code> requires a fresh, secret, <strong>uniformly random nonce <code>k</code></strong>. If <code>k</code> ever repeats — or is even slightly predictable — an attacker can solve a little algebra and recover your private key outright. This is exactly how the 2010 Sony PS3 signing key was extracted: they reused <code>k</code>. So unlike RSA's deterministic padding, classic ECDSA's correctness <em>depends on a healthy random number generator at the moment of signing</em>. (Module 09's EdDSA was designed specifically to remove this footgun by deriving <code>k</code> deterministically.)</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Imagine a <strong>combination dial on a colossal circular track</strong>. Spinning forward <code>d</code> clicks from the start lands you at a marked spot (your public point <code>Q</code>). Anyone can <em>check</em> you ended up at that spot, but staring at the spot tells them nothing about how many clicks you turned — the track is far too large to count backward. The secret nonce <code>k</code> is like a single-use scratch-off code you must never reuse on a second lock.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>ec.generate_private_key(ec.SECP256R1())</code> chooses a random secret integer <code>d</code> and computes the public point <code>Q = d·G</code> on the P-256 curve.</li>
+<li>The keys are serialized to PEM (PKCS#8 private, SubjectPublicKeyInfo public) so PyJWT can consume the bytes directly.</li>
+<li><code>jwt.encode(payload, private_pem, algorithm="ES256")</code> SHA-256-hashes the signing input, draws a random nonce <code>k</code>, and computes the signature pair <code>(r, s)</code>.</li>
+<li>PyJWT encodes <code>(r, s)</code> in the <strong>JOSE/raw concatenated format</strong> (not ASN.1 DER) and base64url-packs it as the token's third segment.</li>
+<li><code>jwt.decode(token, public_pem, algorithms=["ES256"])</code> re-hashes the input and uses the public point <code>Q</code> to confirm <code>(r, s)</code> is mathematically consistent.</li>
+<li>A valid pair returns the claims; a wrong curve or tampered token fails.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>02_es256.py</code>, the signature segment is strikingly <strong>short</strong> — compare it mentally to RSA's 256-byte signatures from Module 06.</li>
+<li>In <code>04_es512.py</code>, the curve is <code>SECP521R1</code> (<strong>521</strong> bits) even though the algorithm is named ES<strong>512</strong> — that's the SHA-512 hash talking.</li>
+<li>In <code>06_curve_must_match_alg.py</code>, a P-256 key handed to <code>ES384</code> raises <code>InvalidKeyError</code> — hard proof the algorithm fixes the curve.</li>
+<li>In <code>05_es256k.py</code>, ES256K uses <code>secp256k1</code>, a <em>different</em> 256-bit curve from ES256's P-256 — same key size, not interchangeable.</li>
+<li>In <code>07_ecdsa_vs_rsa_size.py</code>, the EC key and signature are a fraction of the RSA equivalents at matching security levels.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"ES512 uses a 512-bit curve."</strong> It uses <strong>P-521</strong>. The 512 is the hash (SHA-512). There is no SECP512R1.</li>
+<li><strong>"ES256 and ES256K are the same."</strong> Both are 256-bit + SHA-256, but on <em>different</em> curves (P-256 vs secp256k1). Keys don't cross over.</li>
+<li><strong>"ECDSA is deterministic like RSA."</strong> It is <strong>not</strong> — it needs a secure random nonce per signature, and reuse leaks the private key.</li>
+<li><strong>"Smaller keys mean weaker security."</strong> A 256-bit EC key matches RSA-3072. The compactness comes from harder math, not less safety.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-07-ecdsa-algorithms-es256-es384-es512-es256k">🟢 Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</h1>
+<blockquote>
+<p>Elliptic-curve signatures: <strong>the same security as RSA, in a fraction of the
+size.</strong> This module covers the entire ECDSA JWT family and the single most
+important rule that trips everyone up — <em>each algorithm is welded to one
+specific curve.</em></p>
+</blockquote>
+<hr />
+<h2 id="what-is-ecdsa">🧠 What is ECDSA?</h2>
+<p>ECDSA (Elliptic Curve Digital Signature Algorithm) is an <strong>asymmetric</strong> signing
+scheme. You sign with a <strong>private</strong> key and anyone can verify with the matching
+<strong>public</strong> key — exactly like RSA. The difference is the underlying math:
+elliptic curves instead of large-integer factorisation. The payoff is dramatic
+size savings:</p>
+<table>
+<thead>
+<tr>
+<th>Security level</th>
+<th>RSA key</th>
+<th>EC curve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~112-bit</td>
+<td>RSA-2048</td>
+<td>—</td>
+</tr>
+<tr>
+<td>~128-bit</td>
+<td>RSA-3072</td>
+<td><strong>P-256</strong></td>
+</tr>
+<tr>
+<td>~192-bit</td>
+<td>RSA-7680</td>
+<td><strong>P-384</strong></td>
+</tr>
+<tr>
+<td>~256-bit</td>
+<td>RSA-15360</td>
+<td><strong>P-521</strong></td>
+</tr>
+</tbody>
+</table>
+<p>A 256-bit elliptic-curve key matches a 3072-bit RSA key. Smaller keys ⇒ smaller
+signatures ⇒ smaller tokens ⇒ faster crypto.</p>
+<hr />
+<h2 id="the-golden-rule-algorithm-curve">🔗 The golden rule: algorithm ↔ curve</h2>
+<p>Every ECDSA JWT algorithm is bound to <strong>exactly one</strong> curve and <strong>one</strong> hash.
+You cannot mix them.</p>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Curve (<code>cryptography</code> name)</th>
+<th>NIST / common name</th>
+<th>Hash</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ES256</code></td>
+<td><code>SECP256R1</code></td>
+<td>P-256</td>
+<td>SHA-256</td>
+</tr>
+<tr>
+<td><code>ES384</code></td>
+<td><code>SECP384R1</code></td>
+<td>P-384</td>
+<td>SHA-384</td>
+</tr>
+<tr>
+<td><code>ES512</code></td>
+<td><code>SECP521R1</code></td>
+<td><strong>P-521</strong> ⚠️</td>
+<td>SHA-512</td>
+</tr>
+<tr>
+<td><code>ES256K</code></td>
+<td><code>SECP256K1</code></td>
+<td>secp256k1 (Bitcoin)</td>
+<td>SHA-256</td>
+</tr>
+</tbody>
+</table>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    A[Choose ES algorithm] --&gt; B{Which one?}
+    B --&gt;|ES256| C[SECP256R1 · P-256 · SHA-256]
+    B --&gt;|ES384| D[SECP384R1 · P-384 · SHA-384]
+    B --&gt;|ES512| E[SECP521R1 · P-521 · SHA-512]
+    B --&gt;|ES256K| F[SECP256K1 · Koblitz · SHA-256]
+    C --&gt; G[Generate matching key, then sign]
+    D --&gt; G
+    E --&gt; G
+    F --&gt; G</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_generate_ec_keypair"><code>01_generate_ec_keypair.py</code></a></td>
+<td>Generate a P-256 keypair, serialise to PEM</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/01_generate_ec_keypair.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_es256"><code>02_es256.py</code></a></td>
+<td>Sign/verify with <strong>ES256</strong> (P-256)</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/02_es256.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_es384"><code>03_es384.py</code></a></td>
+<td>Sign/verify with <strong>ES384</strong> (P-384)</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/03_es384.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_es512"><code>04_es512.py</code></a></td>
+<td>Sign/verify with <strong>ES512</strong> (P-<strong>521</strong>!)</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/04_es512.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_es256k"><code>05_es256k.py</code></a></td>
+<td>Sign/verify with <strong>ES256K</strong> (Bitcoin curve)</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/05_es256k.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_curve_must_match_alg"><code>06_curve_must_match_alg.py</code></a></td>
+<td>Prove a P-256 key fails with ES384</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/06_curve_must_match_alg.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_ecdsa_vs_rsa_size"><code>07_ecdsa_vs_rsa_size.py</code></a></td>
+<td>Measure EC vs RSA key &amp; signature sizes</td>
+<td><code>.venv/bin/python pyjwt-course/07-ecdsa-algorithms/07_ecdsa_vs_rsa_size.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run them all:</p>
+<div class="codehl"><pre><span></span><code><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/07-ecdsa-algorithms/0*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>ES512 uses P-521, not "P-512".</strong> There is no SECP512R1 curve. The <code>512</code>
+  refers to <strong>SHA-512</strong>; the curve is the 521-bit <code>SECP521R1</code>. This is the most
+  common ECDSA beginner trap.</li>
+<li><strong>Wrong curve = hard failure.</strong> Signing with a key whose curve doesn't match
+  the algorithm raises <code>InvalidKeyError</code> (see script 06).</li>
+<li><strong>ES256 ≠ ES256K.</strong> Both are 256-bit + SHA-256, but they use <em>different</em>
+  curves (NIST P-256 vs Koblitz secp256k1). They are not interchangeable.</li>
+<li><strong>ECDSA needs a good RNG at sign time.</strong> A repeated/predictable nonce can leak
+  the private key. (EdDSA — Module 09 — fixes this by being deterministic.)</li>
+<li><strong>Always pin <code>algorithms=[...]</code></strong> in <code>jwt.decode()</code>. Never accept an open list.</li>
+</ul>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ul>
+<li>ECDSA gives <strong>RSA-grade security with much smaller keys, signatures, and
+  tokens</strong>.</li>
+<li>Each <code>ES*</code> algorithm is locked to one curve + one hash — memorise the table.</li>
+<li><code>ES256K</code> is the blockchain/DID curve (Bitcoin &amp; Ethereum).</li>
+<li>PyJWT happily accepts PEM bytes/str <strong>or</strong> <code>cryptography</code> key objects for both
+  signing and verifying.</li>
+</ul>
+<p>➡️ <strong>Next:</strong> <a href="08-rsa-pss-algorithms.html">Module 08 · RSA-PSS</a> — modern,
+probabilistic RSA signatures.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 7 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_generate_ec_keypair" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Generate Ec Keypair</b><span>01_generate_ec_keypair.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>ECDSA (Elliptic Curve Digital Signature Algorithm) is a public-key signature
+scheme — just like RSA — but built on <em>elliptic curve</em> math instead of large
+integer factorisation. The headline benefit: <strong>equivalent security with much
+smaller keys</strong> (a 256-bit EC key is roughly as strong as a 3072-bit RSA key).</p>
+<p>In JWT land, the ECDSA family is: ES256, ES384, ES512, ES256K. Each one is
+<em>bound to a specific curve</em> (more on that in later scripts). This first script
+just teaches the mechanics of creating an EC keypair with the <code>cryptography</code>
+library and serialising it to PEM — the text format PyJWT happily consumes.</p>
+<p>We use the <strong>P-256</strong> curve here (named SECP256R1 in <code>cryptography</code>), which is
+the curve required by the most common ECDSA JWT algorithm, ES256.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_generate_ec_keypair.py</span></div><pre>======================================================================
+Generated an EC keypair on curve: secp256r1
+Key size (bits): 256
+======================================================================
+
+--- PRIVATE KEY (PEM, PKCS8) ---
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg3hoQrlaYnP7FiIZA
+ILf8bDSyFECI/w5oxFNekTSAKNChRANCAAShPLon87sM3hsfzdFoXNZecJlwSeim
+/6TdGNgVHRZoEpLfmVsnNP5DkIOfZpJtJ0BcyXwWVBsqs4fwRMSWVLBb
+-----END PRIVATE KEY-----
+
+--- PUBLIC KEY (PEM, SubjectPublicKeyInfo) ---
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoTy6J/O7DN4bH83RaFzWXnCZcEno
+pv+k3RjYFR0WaBKS35lbJzT+Q5CDn2aSbSdAXMl8FlQbKrOH8ETEllSwWw==
+-----END PUBLIC KEY-----
+
+Private PEM length: 241 bytes
+Public  PEM length: 178 bytes</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_generate_ec_keypair.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 01 — Generate an EC (Elliptic Curve) keypair</span>
+<span class="sd">==========================================================</span>
+
+<span class="sd">ECDSA (Elliptic Curve Digital Signature Algorithm) is a public-key signature</span>
+<span class="sd">scheme — just like RSA — but built on *elliptic curve* math instead of large</span>
+<span class="sd">integer factorisation. The headline benefit: **equivalent security with much</span>
+<span class="sd">smaller keys** (a 256-bit EC key is roughly as strong as a 3072-bit RSA key).</span>
+
+<span class="sd">In JWT land, the ECDSA family is: ES256, ES384, ES512, ES256K. Each one is</span>
+<span class="sd">*bound to a specific curve* (more on that in later scripts). This first script</span>
+<span class="sd">just teaches the mechanics of creating an EC keypair with the `cryptography`</span>
+<span class="sd">library and serialising it to PEM — the text format PyJWT happily consumes.</span>
+
+<span class="sd">We use the **P-256** curve here (named SECP256R1 in `cryptography`), which is</span>
+<span class="sd">the curve required by the most common ECDSA JWT algorithm, ES256.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># 1. Generate the private key on a named curve.</span>
+    <span class="c1">#    The private key is the secret signing key; the matching public</span>
+    <span class="c1">#    key (derived from it) is what verifiers use to check signatures.</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+    <span class="n">public_key</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generated an EC keypair on curve:&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">curve</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Key size (bits):&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">key_size</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># 2. Serialise the PRIVATE key to PEM.</span>
+    <span class="c1">#    - PKCS8 is the modern, standard container for private keys.</span>
+    <span class="c1">#    - NoEncryption() means we don&#39;t wrap it in a passphrase (fine</span>
+    <span class="c1">#      for a teaching demo; encrypt at rest in production!).</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="c1"># 3. Serialise the PUBLIC key to PEM.</span>
+    <span class="c1">#    - SubjectPublicKeyInfo is the standard public-key container.</span>
+    <span class="c1"># ------------------------------------------------------------------</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">public_key</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">--- PRIVATE KEY (PEM, PKCS8) ---&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">private_pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;--- PUBLIC KEY (PEM, SubjectPublicKeyInfo) ---&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">public_pem</span><span class="o">.</span><span class="n">decode</span><span class="p">())</span>
+
+    <span class="c1"># Notice how short these PEM blocks are compared with an RSA key —</span>
+    <span class="c1"># that compactness is ECDSA&#39;s signature super-power (script 07).</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Private PEM length:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">private_pem</span><span class="p">),</span> <span class="s2">&quot;bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Public  PEM length:&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">public_pem</span><span class="p">),</span> <span class="s2">&quot;bytes&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/01_generate_ec_keypair.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_es256">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>ES256</b><span>02_es256.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><strong>ES256</strong> = ECDSA using the <strong>P-256</strong> curve (SECP256R1) with <strong>SHA-256</strong>.</p>
+<p>It is by far the most widely deployed ECDSA JWT algorithm — it's what most
+OAuth2 / OpenID Connect providers reach for when they want elliptic-curve
+tokens. The "256" refers to <em>both</em> the curve size (P-256) and the hash
+(SHA-256); for ES256 they happen to line up neatly.</p>
+<p>Key fact to memorise:  <strong>ES256 REQUIRES a P-256 key.</strong>  Hand PyJWT a key on a
+different curve and signing will fail. We'll prove that gotcha in script 06.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_es256.py</span></div><pre>======================================================================
+ES256 token (curve P-256 + SHA-256):
+eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInJvbGUiOiJhZG1pbiIsImlzcyI6ImVzMjU2LWRlbW8ifQ.k1GD1sBulZqTppeMGAJGODGNxyvQSw4D96qfSEn4vj0ROwVVW2QyWdzrP30CPmjAsZSvzLSRqf77l4ZMxOWP2g
+======================================================================
+
+Decoded JOSE header: {&#x27;alg&#x27;: &#x27;ES256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;, &#x27;iss&#x27;: &#x27;es256-demo&#x27;}
+
+Signature segment length (base64url chars): 86</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_es256.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 02 — Signing &amp; verifying with ES256</span>
+<span class="sd">=================================================</span>
+
+<span class="sd">**ES256** = ECDSA using the **P-256** curve (SECP256R1) with **SHA-256**.</span>
+
+<span class="sd">It is by far the most widely deployed ECDSA JWT algorithm — it&#39;s what most</span>
+<span class="sd">OAuth2 / OpenID Connect providers reach for when they want elliptic-curve</span>
+<span class="sd">tokens. The &quot;256&quot; refers to *both* the curve size (P-256) and the hash</span>
+<span class="sd">(SHA-256); for ES256 they happen to line up neatly.</span>
+
+<span class="sd">Key fact to memorise:  **ES256 REQUIRES a P-256 key.**  Hand PyJWT a key on a</span>
+<span class="sd">different curve and signing will fail. We&#39;ll prove that gotcha in script 06.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_p256_pems</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate a P-256 keypair and return (private_pem, public_pem).&quot;&quot;&quot;</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">public_pem</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">private_pem</span><span class="p">,</span> <span class="n">public_pem</span> <span class="o">=</span> <span class="n">make_p256_pems</span><span class="p">()</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;es256-demo&quot;</span><span class="p">}</span>
+
+    <span class="c1"># SIGN: PyJWT accepts the PEM bytes directly and signs with the private key.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ES256 token (curve P-256 + SHA-256):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+
+    <span class="c1"># The JOSE header records the algorithm so verifiers know what to expect.</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Decoded JOSE header:&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>  <span class="c1"># -&gt; {&#39;alg&#39;: &#39;ES256&#39;, &#39;typ&#39;: &#39;JWT&#39;}</span>
+
+    <span class="c1"># VERIFY: use the PUBLIC key. We must whitelist the expected algorithm.</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="c1"># The signature is short — ECDSA produces compact signatures.</span>
+    <span class="n">signature_b64</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Signature segment length (base64url chars):&quot;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">signature_b64</span><span class="p">))</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/02_es256.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_es384">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>ES384</b><span>03_es384.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><strong>ES384</strong> = ECDSA using the <strong>P-384</strong> curve (SECP384R1) with <strong>SHA-384</strong>.</p>
+<p>Step up from ES256: a larger curve and a larger hash, giving a higher security
+margin at the cost of slightly larger keys and signatures. Cloud providers
+often use ES384 for high-assurance signing keys.</p>
+<p>The same iron rule applies — <strong>the algorithm dictates the curve</strong>:
+ES384 must be paired with a SECP384R1 key. A P-256 key will NOT work.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_es384.py</span></div><pre>Curve in use: secp384r1 (key size: 384 bits)
+
+ES384 token (curve P-384 + SHA-384):
+eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IiLCJ0aWVyIjoiaGlnaC1hc3N1cmFuY2UifQ.z0wlLWjtMGXM_ZKSyPgI-jYxjYxLt7cRWVmb05-ndfEV2Dvm3-6t26F11XrNJFbnFHhs7yyzjP53LuqFJu1IsbvvjpKEbC8ydA94GhAJ4y0obaCnkuHBeE9l7woDoXS0
+
+JOSE header: {&#x27;alg&#x27;: &#x27;ES384&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;bob&#x27;, &#x27;tier&#x27;: &#x27;high-assurance&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_es384.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 03 — Signing &amp; verifying with ES384</span>
+<span class="sd">=================================================</span>
+
+<span class="sd">**ES384** = ECDSA using the **P-384** curve (SECP384R1) with **SHA-384**.</span>
+
+<span class="sd">Step up from ES256: a larger curve and a larger hash, giving a higher security</span>
+<span class="sd">margin at the cost of slightly larger keys and signatures. Cloud providers</span>
+<span class="sd">often use ES384 for high-assurance signing keys.</span>
+
+<span class="sd">The same iron rule applies — **the algorithm dictates the curve**:</span>
+<span class="sd">ES384 must be paired with a SECP384R1 key. A P-256 key will NOT work.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># ES384 is bound to the P-384 curve. Generate the matching key.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP384R1</span><span class="p">())</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Curve in use:&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">curve</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;(key size:&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">key_size</span><span class="p">,</span> <span class="s2">&quot;bits)&quot;</span><span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;bob&quot;</span><span class="p">,</span> <span class="s2">&quot;tier&quot;</span><span class="p">:</span> <span class="s2">&quot;high-assurance&quot;</span><span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES384&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">ES384 token (curve P-384 + SHA-384):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">))</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES384&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/03_es384.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_es512">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>ES512</b><span>04_es512.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><strong>ES512</strong> = ECDSA using the <strong>P-521</strong> curve (SECP521R1) with <strong>SHA-512</strong>.</p>
+<p>⚠️  THE CLASSIC GOTCHA  ⚠️
+The JWT algorithm is spelled <strong>ES512</strong> but the underlying curve is <strong>P-521</strong>
+(five-hundred-and-TWENTY-ONE), <em>not</em> P-512. There is no such thing as a P-512
+curve. The "512" in the algorithm name refers to the <strong>SHA-512 hash</strong>, while
+the curve is the oddly-sized 521-bit NIST curve.</p>
+<p>So when you read "ES512":
+    - hash      = SHA-512      (the 512)
+    - curve     = SECP521R1    (P-521, the 521)</p>
+<p>Mixing these up — e.g. searching for a "SECP512R1" that doesn't exist — is a
+rite of passage. This script generates the <em>correct</em> SECP521R1 key.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_es512.py</span></div><pre>Algorithm name : ES512
+Hash function  : SHA-512  &lt;- the &#x27;512&#x27; in the name
+Curve actually :  secp521r1  &lt;- P-521, NOT P-512!
+Key size (bits): 521
+
+ES512 token:
+eyJhbGciOiJFUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsIm5vdGUiOiJFUzUxMiB1c2VzIHRoZSBQLTUyMSBjdXJ2ZSJ9.AYDFuO37lBdeoGyy9p-VAXWpVeQd7CxNvHX_psVaX6A3oEAKcIk4cVunWj0y7T01x8mRFeoauvlZQNQjd5MKFnOeAAW3oVrrPTNU6Ykhz6MIOLEvkW3ppjVan-Z7ojwFmJ2wO9cgaKUiy0Hr2pArxcQCpBnClkmn0LJbzoQ7Yluo-hIq
+
+JOSE header: {&#x27;alg&#x27;: &#x27;ES512&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;carol&#x27;, &#x27;note&#x27;: &#x27;ES512 uses the P-521 curve&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_es512.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 04 — Signing &amp; verifying with ES512  (mind the 512 vs 521!)</span>
+<span class="sd">========================================================================</span>
+
+<span class="sd">**ES512** = ECDSA using the **P-521** curve (SECP521R1) with **SHA-512**.</span>
+
+<span class="sd">⚠️  THE CLASSIC GOTCHA  ⚠️</span>
+<span class="sd">The JWT algorithm is spelled **ES512** but the underlying curve is **P-521**</span>
+<span class="sd">(five-hundred-and-TWENTY-ONE), *not* P-512. There is no such thing as a P-512</span>
+<span class="sd">curve. The &quot;512&quot; in the algorithm name refers to the **SHA-512 hash**, while</span>
+<span class="sd">the curve is the oddly-sized 521-bit NIST curve.</span>
+
+<span class="sd">So when you read &quot;ES512&quot;:</span>
+<span class="sd">    - hash      = SHA-512      (the 512)</span>
+<span class="sd">    - curve     = SECP521R1    (P-521, the 521)</span>
+
+<span class="sd">Mixing these up — e.g. searching for a &quot;SECP512R1&quot; that doesn&#39;t exist — is a</span>
+<span class="sd">rite of passage. This script generates the *correct* SECP521R1 key.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># NOTE: SECP521R1, not &quot;SECP512R1&quot; — the latter does not exist.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP521R1</span><span class="p">())</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Algorithm name : ES512&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Hash function  : SHA-512  &lt;- the &#39;512&#39; in the name&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Curve actually : &quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">curve</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot; &lt;- P-521, NOT P-512!&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Key size (bits):&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">key_size</span><span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;carol&quot;</span><span class="p">,</span> <span class="s2">&quot;note&quot;</span><span class="p">:</span> <span class="s2">&quot;ES512 uses the P-521 curve&quot;</span><span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES512&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">ES512 token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">))</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES512&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/04_es512.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_es256k">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>ES256K</b><span>05_es256k.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><strong>ES256K</strong> = ECDSA using the <strong>secp256k1</strong> curve with <strong>SHA-256</strong>.</p>
+<p>The trailing <strong>K</strong> stands for <em>Koblitz</em> — the secp256k1 curve is a special
+Koblitz curve famous for being the signing curve of <strong>Bitcoin</strong> and <strong>Ethereum</strong>.
+It is a <em>different</em> curve from the NIST P-256 (SECP256R1) used by ES256, even
+though both are 256-bit and both use SHA-256.</p>
+<div class="codehl"><pre><span></span><code>ES256   -&gt;  SECP256R1   (NIST &quot;P-256&quot;, the random/prime curve)
+ES256K  -&gt;  SECP256K1   (Koblitz curve, Bitcoin/Ethereum)
+</code></pre></div>
+
+<p>ES256K was added to the JOSE registry largely to support blockchain / DID
+(decentralised identity) use cases. PyJWT supports it out of the box.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_es256k.py</span></div><pre>Curve in use: secp256k1 (Bitcoin / Ethereum curve)
+
+ES256K token (secp256k1 + SHA-256):
+eyJhbGciOiJFUzI1NksiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJkYXZlIiwid2FsbGV0IjoiMHhERUFEQkVFRiIsImFsZ19ub3RlIjoiS29ibGl0eiBjdXJ2ZSJ9.il13zr9kD5cLHXKjdudFPtwHf-aZvfoDUOkTWTWb6ldLhxSksZzwO_p5temovQ2cYl1W4deENEyJ3098i0wsgA
+
+JOSE header: {&#x27;alg&#x27;: &#x27;ES256K&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Verified payload: {&#x27;sub&#x27;: &#x27;dave&#x27;, &#x27;wallet&#x27;: &#x27;0xDEADBEEF&#x27;, &#x27;alg_note&#x27;: &#x27;Koblitz curve&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_es256k.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 05 — Signing &amp; verifying with ES256K  (Bitcoin&#39;s curve)</span>
+<span class="sd">====================================================================</span>
+
+<span class="sd">**ES256K** = ECDSA using the **secp256k1** curve with **SHA-256**.</span>
+
+<span class="sd">The trailing **K** stands for *Koblitz* — the secp256k1 curve is a special</span>
+<span class="sd">Koblitz curve famous for being the signing curve of **Bitcoin** and **Ethereum**.</span>
+<span class="sd">It is a *different* curve from the NIST P-256 (SECP256R1) used by ES256, even</span>
+<span class="sd">though both are 256-bit and both use SHA-256.</span>
+
+<span class="sd">    ES256   -&gt;  SECP256R1   (NIST &quot;P-256&quot;, the random/prime curve)</span>
+<span class="sd">    ES256K  -&gt;  SECP256K1   (Koblitz curve, Bitcoin/Ethereum)</span>
+
+<span class="sd">ES256K was added to the JOSE registry largely to support blockchain / DID</span>
+<span class="sd">(decentralised identity) use cases. PyJWT supports it out of the box.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># secp256k1 — the Koblitz curve. Note the &#39;K&#39; suffix in SECP256K1.</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256K1</span><span class="p">())</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Curve in use:&quot;</span><span class="p">,</span> <span class="n">private_key</span><span class="o">.</span><span class="n">curve</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;(Bitcoin / Ethereum curve)&quot;</span><span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;dave&quot;</span><span class="p">,</span> <span class="s2">&quot;wallet&quot;</span><span class="p">:</span> <span class="s2">&quot;0xDEADBEEF&quot;</span><span class="p">,</span> <span class="s2">&quot;alg_note&quot;</span><span class="p">:</span> <span class="s2">&quot;Koblitz curve&quot;</span><span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES256K&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">ES256K token (secp256k1 + SHA-256):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">JOSE header:&quot;</span><span class="p">,</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">))</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES256K&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/05_es256k.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_curve_must_match_alg">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Curve Must Match Alg</b><span>06_curve_must_match_alg.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>This is the single most important operational fact about ECDSA in JWTs:</p>
+<div class="codehl"><pre><span></span><code>ES256   &lt;-&gt;  SECP256R1  (P-256)
+ES384   &lt;-&gt;  SECP384R1  (P-384)
+ES512   &lt;-&gt;  SECP521R1  (P-521)
+ES256K  &lt;-&gt;  SECP256K1  (secp256k1)
+</code></pre></div>
+
+<p>You cannot mix and match. If you generate a <strong>P-256</strong> key and try to sign with
+<strong>ES384</strong>, PyJWT (via the cryptography backend) rejects it, because ES384's
+SHA-384 + P-384 contract is violated. The RFC 7518 spec ties each algorithm to
+exactly one curve so that verifiers know precisely what to validate.</p>
+<p>This script demonstrates the failure <em>and</em> the success, catching the error so
+the script still exits 0.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_curve_must_match_alg.py</span></div><pre>======================================================================
+Attempt 1: sign with ES384 using a P-256 key  (EXPECTED TO FAIL)
+======================================================================
+Caught InvalidKeyError : The key&#x27;s curve &#x27;secp256r1&#x27; does not match the expected curve &#x27;secp384r1&#x27; for this algorithm
+Reason: ES384 demands a P-384 (SECP384R1) key; we gave it P-256.
+
+======================================================================
+Attempt 2: sign with ES384 using the CORRECT P-384 key  (SUCCEEDS)
+======================================================================
+Token: eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlcmluIn0.P4nQg_W2NV_HSXWMdFFOxVH5igNJTwk6bP1xaJu-yDKDRNQXWTfPhSpN0XkYyAKAK_GJNzzYfTgg50VVADQwkeiMsQ-kguYvszcwpf4f_kpbgxmVZpcx-9h_FnkplFhU
+Verified payload: {&#x27;sub&#x27;: &#x27;erin&#x27;}
+
+Lesson: match the curve to the algorithm — always.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_curve_must_match_alg.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 06 — Each ES algorithm is BOUND to one specific curve</span>
+<span class="sd">==================================================================</span>
+
+<span class="sd">This is the single most important operational fact about ECDSA in JWTs:</span>
+
+<span class="sd">    ES256   &lt;-&gt;  SECP256R1  (P-256)</span>
+<span class="sd">    ES384   &lt;-&gt;  SECP384R1  (P-384)</span>
+<span class="sd">    ES512   &lt;-&gt;  SECP521R1  (P-521)</span>
+<span class="sd">    ES256K  &lt;-&gt;  SECP256K1  (secp256k1)</span>
+
+<span class="sd">You cannot mix and match. If you generate a **P-256** key and try to sign with</span>
+<span class="sd">**ES384**, PyJWT (via the cryptography backend) rejects it, because ES384&#39;s</span>
+<span class="sd">SHA-384 + P-384 contract is violated. The RFC 7518 spec ties each algorithm to</span>
+<span class="sd">exactly one curve so that verifiers know precisely what to validate.</span>
+
+<span class="sd">This script demonstrates the failure *and* the success, catching the error so</span>
+<span class="sd">the script still exits 0.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pem_pair</span><span class="p">(</span><span class="n">curve</span><span class="p">:</span> <span class="n">ec</span><span class="o">.</span><span class="n">EllipticCurve</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]:</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">curve</span><span class="p">)</span>
+    <span class="n">priv</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="n">pub</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">priv</span><span class="p">,</span> <span class="n">pub</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;erin&quot;</span><span class="p">}</span>
+
+    <span class="c1"># A P-256 key — correct for ES256, WRONG for ES384.</span>
+    <span class="n">p256_priv</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">pem_pair</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Attempt 1: sign with ES384 using a P-256 key  (EXPECTED TO FAIL)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">p256_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES384&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;!! Unexpected success — this should not happen.&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># noqa: BLE001 — we want to teach via the message</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Caught&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="s2">&quot;:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reason: ES384 demands a P-384 (SECP384R1) key; we gave it P-256.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Attempt 2: sign with ES384 using the CORRECT P-384 key  (SUCCEEDS)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">p384_priv</span><span class="p">,</span> <span class="n">p384_pub</span> <span class="o">=</span> <span class="n">pem_pair</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP384R1</span><span class="p">())</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">p384_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES384&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">p384_pub</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES384&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token:&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verified payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Lesson: match the curve to the algorithm — always.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/06_curve_must_match_alg.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_ecdsa_vs_rsa_size">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>ECDSA Vs RSA Size</b><span>07_ecdsa_vs_rsa_size.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Why bother with elliptic curves at all? <strong>Size and speed.</strong></p>
+<p>A 256-bit EC key (P-256) offers roughly the same security level as a
+<strong>3072-bit</strong> RSA key (~128-bit security). Even compared with a 2048-bit RSA key
+(~112-bit security, <em>weaker</em> than P-256), the EC key and its signatures are
+dramatically smaller. Smaller keys &amp; signatures mean:</p>
+<div class="codehl"><pre><span></span><code>- smaller tokens on the wire
+- less storage / bandwidth
+- faster signing on constrained devices
+</code></pre></div>
+
+<p>This script measures it concretely: PEM sizes for the public keys, and the
+signature segment length of an actual JWT signed with each scheme.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_ecdsa_vs_rsa_size.py</span></div><pre>======================================================================
+PUBLIC KEY PEM SIZE
+======================================================================
+  EC P-256   :   178 bytes
+  RSA-2048   :   451 bytes
+  RSA is 2.5x larger for *weaker* security.
+
+======================================================================
+JWT SIGNATURE SEGMENT SIZE (base64url chars)
+======================================================================
+  ES256 sig  :    86
+  RS256 sig  :   342
+
+======================================================================
+WHOLE TOKEN SIZE
+======================================================================
+  ES256 token:   144 chars
+  RS256 token:   400 chars
+
+Takeaway: P-256 matches ~3072-bit RSA security, yet keys, signatures,
+and tokens are all far smaller. That is the ECDSA value proposition.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_ecdsa_vs_rsa_size.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · ECDSA · 07 — ECDSA vs RSA: tiny keys, equivalent security</span>
+<span class="sd">==============================================================</span>
+
+<span class="sd">Why bother with elliptic curves at all? **Size and speed.**</span>
+
+<span class="sd">A 256-bit EC key (P-256) offers roughly the same security level as a</span>
+<span class="sd">**3072-bit** RSA key (~128-bit security). Even compared with a 2048-bit RSA key</span>
+<span class="sd">(~112-bit security, *weaker* than P-256), the EC key and its signatures are</span>
+<span class="sd">dramatically smaller. Smaller keys &amp; signatures mean:</span>
+
+<span class="sd">    - smaller tokens on the wire</span>
+<span class="sd">    - less storage / bandwidth</span>
+<span class="sd">    - faster signing on constrained devices</span>
+
+<span class="sd">This script measures it concretely: PEM sizes for the public keys, and the</span>
+<span class="sd">signature segment length of an actual JWT signed with each scheme.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">ec</span><span class="p">,</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ec_pems</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]:</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">ec</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">ec</span><span class="o">.</span><span class="n">SECP256R1</span><span class="p">())</span>
+    <span class="k">return</span> <span class="p">(</span>
+        <span class="n">key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+        <span class="p">),</span>
+        <span class="n">key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rsa_pems</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]:</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span>
+        <span class="n">key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+        <span class="p">),</span>
+        <span class="n">key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span><span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sig_len</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Length of the base64url signature segment of a JWT.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">ec_priv</span><span class="p">,</span> <span class="n">ec_pub</span> <span class="o">=</span> <span class="n">ec_pems</span><span class="p">()</span>
+    <span class="n">rsa_priv</span><span class="p">,</span> <span class="n">rsa_pub</span> <span class="o">=</span> <span class="n">rsa_pems</span><span class="p">()</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;frank&quot;</span><span class="p">}</span>
+
+    <span class="n">es256</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">ec_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;ES256&quot;</span><span class="p">)</span>
+    <span class="n">rs256</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">rsa_priv</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Sanity: both verify.</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">es256</span><span class="p">,</span> <span class="n">ec_pub</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ES256&quot;</span><span class="p">])</span>
+    <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">rs256</span><span class="p">,</span> <span class="n">rsa_pub</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PUBLIC KEY PEM SIZE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  EC P-256   : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">ec_pub</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  RSA-2048   : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rsa_pub</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  RSA is </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rsa_pub</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">ec_pub</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">x larger for *weaker* security.&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;JWT SIGNATURE SEGMENT SIZE (base64url chars)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ES256 sig  : </span><span class="si">{</span><span class="n">sig_len</span><span class="p">(</span><span class="n">es256</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  RS256 sig  : </span><span class="si">{</span><span class="n">sig_len</span><span class="p">(</span><span class="n">rs256</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WHOLE TOKEN SIZE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ES256 token: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">es256</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> chars&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  RS256 token: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rs256</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;5</span><span class="si">}</span><span class="s2"> chars&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Takeaway: P-256 matches ~3072-bit RSA security, yet keys, signatures,&quot;</span>
+        <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">and tokens are all far smaller. That is the ECDSA value proposition.&quot;</span>
+    <span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/07-ecdsa-algorithms/07_ecdsa_vs_rsa_size.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="06-rsa-algorithms.html"><div class="dir">← Previous</div><div class="ttl">06 · Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</div></a><a class="next" href="08-rsa-pss-algorithms.html"><div class="dir">Next →</div><div class="ttl">08 · Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

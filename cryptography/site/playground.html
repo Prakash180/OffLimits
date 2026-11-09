@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JWT Playground · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/pygments.css">
+<link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="index.html">
+    <img src="assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="index.html"><span class="num">⌂</span>Home</a>
+    <a href="playground.html" class="active"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="index.html">Home</a> &nbsp;/&nbsp; <b>Playground</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow">▶ Interactive</span>
+  <h1 style="margin-top:18px">JWT <span class="gradient-text">Playground</span></h1>
+  <p class="lead">Paste any JWT to decode it instantly in your browser — no token ever
+  leaves this page. For <code>HS256/384/512</code> tokens you can also test a secret and
+  watch the signature verify live via the Web Crypto API.</p>
+</section>
+
+<div class="pg-grid">
+  <div class="pg-card reveal">
+    <h3>1 · Paste a token</h3>
+    <textarea id="token-in" class="token-in" spellcheck="false">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleS0xIn0.eyJzdWIiOiJhbGljZSIsIm5hbWUiOiJBbGljZSBFeGFtcGxlIiwic2NvcGUiOiJyZWFkIHdyaXRlIiwicm9sZSI6ImFkbWluIiwiaXNzIjoiaHR0cHM6Ly9jb2RleC5sb2NhbCIsImF1ZCI6ImFwaTovL2NvZGV4IiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQwMDAwMDAwMDB9.QFnX0n7iJYz3l3oS3Y0m2t8Yy0aQ2m0r2k7m1m0sJ0</textarea>
+    <h3 style="margin-top:18px">2 · Test an HMAC secret <span style="font-weight:500;color:var(--faint);font-size:.8rem">(HS* only)</span></h3>
+    <input id="secret-in" class="secret-in" placeholder="shared secret…" spellcheck="false">
+    <div id="verify-status" style="margin-top:12px"></div>
+  </div>
+  <div class="pg-card reveal">
+    <h3>Decoded</h3>
+    <div id="dec-status" style="margin-bottom:12px"></div>
+    <div id="jwt-viz" class="jwt-viz"></div>
+    <div id="dec-header" style="margin-top:16px"></div>
+    <div id="dec-payload" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<h2>How decoding works</h2>
+<p style="color:var(--muted)">The header and payload are just base64url-encoded JSON — readable by anyone.
+That is why a JWT is <b>signed, not encrypted</b>. Only the signature requires a key, and only
+to <em>verify</em> integrity (or, for HMAC, to also re-create it).</p>
+<figure class="figure reveal"><img src="assets/svg/jwt-structure.svg" alt="jwt structure" style="max-width:640px"></figure>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="assets/vendor/mermaid.min.js"></script>
+<script src="assets/vendor/lottie.min.js"></script>
+<script src="assets/js/app.js"></script>
+</body></html>

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 320" width="820" height="320" role="img" aria-label="Symmetric versus asymmetric keys">
+  <defs>
+    <style>
+      .ttl { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 18px; }
+      .sub { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 500; font-size: 13px; }
+      .party { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 600; font-size: 13px; }
+      .flow { stroke-dasharray: 6 8; animation: march 1.4s linear infinite; }
+      @keyframes march { to { stroke-dashoffset: -28; } }
+      @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+    </style>
+  </defs>
+
+  <line x1="410" y1="36" x2="410" y2="296" stroke="#1e293b" stroke-width="2" stroke-dasharray="4 6"/>
+
+  <!-- Symmetric -->
+  <text class="ttl" x="200" y="44" text-anchor="middle" fill="#22d3ee">Symmetric (HMAC)</text>
+  <text class="sub" x="200" y="66" text-anchor="middle" fill="#94a3b8">one shared secret</text>
+
+  <circle cx="92" cy="170" r="34" fill="#0f172a" stroke="#22d3ee" stroke-width="2.5"/>
+  <text class="party" x="92" y="175" text-anchor="middle" fill="#e2e8f0">A</text>
+  <circle cx="308" cy="170" r="34" fill="#0f172a" stroke="#22d3ee" stroke-width="2.5"/>
+  <text class="party" x="308" y="175" text-anchor="middle" fill="#e2e8f0">B</text>
+
+  <line class="flow" x1="130" y1="170" x2="270" y2="170" stroke="#22d3ee" stroke-width="2.5"/>
+
+  <!-- shared key glyph -->
+  <g transform="translate(200,170)">
+    <circle cx="0" cy="0" r="26" fill="#22d3ee" fill-opacity="0.14" stroke="#22d3ee" stroke-width="2.5"/>
+    <circle cx="-6" cy="-3" r="7" fill="none" stroke="#22d3ee" stroke-width="2.5"/>
+    <path d="M-2 0 L12 14 M6 8 L12 2 M9 11 L14 6" stroke="#22d3ee" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  </g>
+  <text class="sub" x="200" y="240" text-anchor="middle" fill="#7dd3fc">same key signs &amp; verifies</text>
+
+  <!-- Asymmetric -->
+  <text class="ttl" x="610" y="44" text-anchor="middle" fill="#a78bfa">Asymmetric (RSA / EC)</text>
+  <text class="sub" x="610" y="66" text-anchor="middle" fill="#94a3b8">public / private keypair</text>
+
+  <circle cx="502" cy="170" r="34" fill="#0f172a" stroke="#a78bfa" stroke-width="2.5"/>
+  <text class="party" x="502" y="175" text-anchor="middle" fill="#e2e8f0">A</text>
+  <circle cx="718" cy="170" r="34" fill="#0f172a" stroke="#34d399" stroke-width="2.5"/>
+  <text class="party" x="718" y="175" text-anchor="middle" fill="#e2e8f0">B</text>
+
+  <line class="flow" x1="540" y1="170" x2="680" y2="170" stroke="#34d399" stroke-width="2.5"/>
+
+  <!-- private key -->
+  <g transform="translate(502,238)">
+    <circle cx="0" cy="0" r="22" fill="#a78bfa" fill-opacity="0.14" stroke="#a78bfa" stroke-width="2.5"/>
+    <circle cx="-5" cy="-2" r="6" fill="none" stroke="#a78bfa" stroke-width="2.2"/>
+    <path d="M-1 0 L10 11 M5 6 L10 1 M8 9 L12 5" stroke="#a78bfa" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+  </g>
+  <text class="sub" x="502" y="290" text-anchor="middle" fill="#c4b5fd">private signs</text>
+
+  <!-- public key -->
+  <g transform="translate(718,238)">
+    <circle cx="0" cy="0" r="22" fill="#34d399" fill-opacity="0.14" stroke="#34d399" stroke-width="2.5"/>
+    <circle cx="-5" cy="-2" r="6" fill="none" stroke="#34d399" stroke-width="2.2"/>
+    <path d="M-1 0 L10 11 M5 6 L10 1 M8 9 L12 5" stroke="#34d399" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+  </g>
+  <text class="sub" x="718" y="290" text-anchor="middle" fill="#6ee7b7">public verifies</text>
+</svg>

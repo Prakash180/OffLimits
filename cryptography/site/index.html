@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The PyJWT Codex — Interactive JWT &amp; Cryptography Course</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/pygments.css">
+<link rel="stylesheet" href="assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="index.html">
+    <img src="assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="index.html" class="active"><span class="num">⌂</span>Home</a>
+    <a href="playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><b>Home</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<section class="hero">
+  <div class="hero-grid">
+    <div>
+      <span class="eyebrow">🔐 Signed, not encrypted</span>
+      <h1 style="margin-top:18px">The <span class="gradient-text">PyJWT Codex</span></h1>
+      <p class="lead">Learn JSON Web Tokens end-to-end — from the raw base64url bytes of a
+      token to production OAuth2 / OIDC — with a deep, visual dive into the cryptography
+      that makes it all work. <b>118 runnable, verified examples.</b></p>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="m/01-foundations.html">Start the course →</a>
+        <a class="btn btn-ghost" href="playground.html">▶ Open the JWT Playground</a>
+      </div>
+    </div>
+    <div><div class="hero-lottie" data-lottie="assets/lottie/hero-shield.json" style="height:360px"></div></div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stat reveal"><div class="n gradient-text">16</div><div class="l">Modules</div></div>
+  <div class="stat reveal"><div class="n gradient-text">118</div><div class="l">Examples</div></div>
+  <div class="stat reveal"><div class="n gradient-text">5</div><div class="l">Algo families</div></div>
+  <div class="stat reveal"><div class="n gradient-text">0</div><div class="l">npm deps</div></div>
+</section>
+
+<figure class="figure reveal"><img src="assets/svg/jwt-structure.svg" alt="JWT structure" style="max-width:680px">
+<figcaption>A JWT is three base64url segments — <b style="color:var(--cyan)">header</b>.<b style="color:var(--violet)">payload</b>.<b style="color:var(--emerald)">signature</b> — joined by dots.</figcaption></figure>
+
+<h2>🗺️ Your learning path</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+  A["01 · Foundations"] --> B["02 · HS256 Basics"] --> C["03 · Registered Claims"]
+  C --> D["04 · Custom Claims"] --> E["05 · HMAC"] --> F["06 · RSA"]
+  F --> G["07 · ECDSA"] --> H["08 · RSA-PSS"] --> I["09 · EdDSA"]
+  I --> J["10 · Headers & kid"] --> K["11 · JWKS & Rotation"] --> L["12 · Errors"]
+  L --> M["13 · Cryptography"] --> N["14 · Security"] --> O["15 · Real-World"]
+  O --> P["16 · Local IdP"]</div></div>
+
+<h2>📚 All modules</h2>
+<div class="grid">
+<a class="card reveal" href="m/01-foundations.html" style="--accent:linear-gradient(90deg,#22d3ee,#0ea5e9)">
+  <div class="kicker">Module 01</div>
+  <h3>Module 01 · Foundations — What a JWT actually is</h3>
+  <p>Decode a token by hand: base64url, the three segments, and why JWTs are readable.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/02-getting-started-hs256.html" style="--accent:linear-gradient(90deg,#a78bfa,#7c3aed)">
+  <div class="kicker">Module 02</div>
+  <h3>Module 02 · Getting Started with HS256</h3>
+  <p>Your first encode/decode with HS256 — secrets, round-trips, str vs bytes.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/03-registered-claims.html" style="--accent:linear-gradient(90deg,#34d399,#10b981)">
+  <div class="kicker">Module 03</div>
+  <h3>Module 03 · Registered Claims</h3>
+  <p>The seven registered claims: iss, sub, aud, exp, nbf, iat, jti.</p>
+  <div class="chips"><span class="chip">10 examples</span></div>
+</a>
+<a class="card reveal" href="m/04-custom-claims-and-validation.html" style="--accent:linear-gradient(90deg,#fbbf24,#f59e0b)">
+  <div class="kicker">Module 04</div>
+  <h3>Module 04 · Custom Claims &amp; Validation Options</h3>
+  <p>Custom claims plus the decode() control surface: options, require, leeway.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/05-hmac-algorithms.html" style="--accent:linear-gradient(90deg,#f472b6,#db2777)">
+  <div class="kicker">Module 05</div>
+  <h3>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</h3>
+  <p>Symmetric HMAC signing — HS256 / HS384 / HS512 and the shared-secret model.</p>
+  <div class="chips"><span class="chip">6 examples</span></div>
+</a>
+<a class="card reveal" href="m/06-rsa-algorithms.html" style="--accent:linear-gradient(90deg,#60a5fa,#2563eb)">
+  <div class="kicker">Module 06</div>
+  <h3>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</h3>
+  <p>Asymmetric RSA — RS256/384/512, keypairs, and private-signs/public-verifies.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/07-ecdsa-algorithms.html" style="--accent:linear-gradient(90deg,#f87171,#dc2626)">
+  <div class="kicker">Module 07</div>
+  <h3>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</h3>
+  <p>Elliptic-curve ECDSA — ES256/384/512/256K and the curve-to-algorithm binding.</p>
+  <div class="chips"><span class="chip">7 examples</span></div>
+</a>
+<a class="card reveal" href="m/08-rsa-pss-algorithms.html" style="--accent:linear-gradient(90deg,#a3e635,#65a30d)">
+  <div class="kicker">Module 08</div>
+  <h3>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</h3>
+  <p>Probabilistic RSA-PSS — PS256/384/512 and randomised signatures.</p>
+  <div class="chips"><span class="chip">5 examples</span></div>
+</a>
+<a class="card reveal" href="m/09-eddsa-algorithms.html" style="--accent:linear-gradient(90deg,#22d3ee,#0ea5e9)">
+  <div class="kicker">Module 09</div>
+  <h3>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</h3>
+  <p>Modern EdDSA — Ed25519 / Ed448, deterministic and tiny.</p>
+  <div class="chips"><span class="chip">5 examples</span></div>
+</a>
+<a class="card reveal" href="m/10-headers-and-kid.html" style="--accent:linear-gradient(90deg,#a78bfa,#7c3aed)">
+  <div class="kicker">Module 10</div>
+  <h3>Module 10 · Headers &amp; kid</h3>
+  <p>The JOSE header, custom headers, and how kid drives key selection.</p>
+  <div class="chips"><span class="chip">6 examples</span></div>
+</a>
+<a class="card reveal" href="m/11-jwks-and-key-rotation.html" style="--accent:linear-gradient(90deg,#34d399,#10b981)">
+  <div class="kicker">Module 11</div>
+  <h3>Module 11 · JWKS &amp; Key Rotation</h3>
+  <p>JWKS, the JWK format, PyJWKClient, and zero-downtime key rotation.</p>
+  <div class="chips"><span class="chip">7 examples</span></div>
+</a>
+<a class="card reveal" href="m/12-validation-errors-and-leeway.html" style="--accent:linear-gradient(90deg,#fbbf24,#f59e0b)">
+  <div class="kicker">Module 12</div>
+  <h3>Module 12 · Validation, Errors &amp; Leeway</h3>
+  <p>The exception hierarchy, leeway for clock skew, and robust validation.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/13-cryptography-deep-dive.html" style="--accent:linear-gradient(90deg,#f472b6,#db2777)">
+  <div class="kicker">Module 13</div>
+  <h3>Module 13 · Cryptography Deep Dive</h3>
+  <p>Cryptography from primitives: hashing, HMAC, signatures, key formats.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/14-security-best-practices.html" style="--accent:linear-gradient(90deg,#60a5fa,#2563eb)">
+  <div class="kicker">Module 14</div>
+  <h3>Module 14 · Security Best Practices</h3>
+  <p>alg=none, algorithm confusion, and the JWT security checklist.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/15-real-world-fastapi-oauth.html" style="--accent:linear-gradient(90deg,#f87171,#dc2626)">
+  <div class="kicker">Module 15</div>
+  <h3>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</h3>
+  <p>FastAPI auth, access/refresh tokens, scopes, and OIDC validation.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a>
+<a class="card reveal" href="m/16-local-identity-provider.html" style="--accent:linear-gradient(90deg,#a3e635,#65a30d)">
+  <div class="kicker">Module 16</div>
+  <h3>Module 16 · Build Your Own Local Identity Provider</h3>
+  <p>A fully local OAuth2/OIDC identity provider — no Azure required.</p>
+  <div class="chips"><span class="chip">8 examples</span></div>
+</a></div>
+
+<h2>🎨 Concepts, visualised</h2>
+<div class="grid">
+  <figure class="figure reveal"><img src="assets/svg/sign-verify-flow.svg" alt="sign and verify"><figcaption>Sign with the private key, verify with the public key.</figcaption></figure>
+  <figure class="figure reveal"><img src="assets/svg/sym-vs-asym.svg" alt="symmetric vs asymmetric"><figcaption>Shared-secret (HMAC) vs. public/private keypairs.</figcaption></figure>
+  <figure class="figure reveal"><img src="assets/svg/algorithm-families.svg" alt="algorithm families"><figcaption>The five signing families covered in this course.</figcaption></figure>
+  <figure class="figure reveal"><img src="assets/svg/key-rotation.svg" alt="key rotation"><figcaption>A token's <code>kid</code> selects the matching key from a JWKS.</figcaption></figure>
+</div>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="assets/vendor/mermaid.min.js"></script>
+<script src="assets/vendor/lottie.min.js"></script>
+<script src="assets/js/app.js"></script>
+</body></html>

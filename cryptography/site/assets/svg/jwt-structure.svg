@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 240" width="760" height="240" role="img" aria-label="JWT structure: header dot payload dot signature">
+  <defs>
+    <style>
+      .seg-label { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 22px; }
+      .seg-sub { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 500; font-size: 13px; letter-spacing: .4px; }
+      .seg-mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; }
+      .dot { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 800; font-size: 40px; fill: #64748b; }
+      .seg { animation: floaty 4s ease-in-out infinite; }
+      .seg.b { animation-delay: .5s; }
+      .seg.c { animation-delay: 1s; }
+      @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      @media (prefers-reduced-motion: reduce) { .seg { animation: none; } }
+    </style>
+    <linearGradient id="gHeader" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="gPayload" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="gSig" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0.06"/>
+    </linearGradient>
+  </defs>
+
+  <g class="seg a">
+    <rect x="24" y="64" width="200" height="112" rx="18" fill="url(#gHeader)" stroke="#22d3ee" stroke-width="2.5"/>
+    <text class="seg-label" x="124" y="110" text-anchor="middle" fill="#22d3ee">Header</text>
+    <text class="seg-sub" x="124" y="134" text-anchor="middle" fill="#7dd3fc">alg &amp; typ</text>
+    <text class="seg-mono" x="124" y="158" text-anchor="middle" fill="#94a3b8">base64url</text>
+  </g>
+
+  <text class="dot" x="244" y="135" text-anchor="middle">.</text>
+
+  <g class="seg b">
+    <rect x="280" y="64" width="200" height="112" rx="18" fill="url(#gPayload)" stroke="#a78bfa" stroke-width="2.5"/>
+    <text class="seg-label" x="380" y="110" text-anchor="middle" fill="#a78bfa">Payload</text>
+    <text class="seg-sub" x="380" y="134" text-anchor="middle" fill="#c4b5fd">claims (sub, exp…)</text>
+    <text class="seg-mono" x="380" y="158" text-anchor="middle" fill="#94a3b8">base64url</text>
+  </g>
+
+  <text class="dot" x="500" y="135" text-anchor="middle">.</text>
+
+  <g class="seg c">
+    <rect x="536" y="64" width="200" height="112" rx="18" fill="url(#gSig)" stroke="#34d399" stroke-width="2.5"/>
+    <text class="seg-label" x="636" y="110" text-anchor="middle" fill="#34d399">Signature</text>
+    <text class="seg-sub" x="636" y="134" text-anchor="middle" fill="#6ee7b7">HMAC / RSA / EC</text>
+    <text class="seg-mono" x="636" y="158" text-anchor="middle" fill="#94a3b8">verifies integrity</text>
+  </g>
+
+  <text class="seg-sub" x="380" y="216" text-anchor="middle" fill="#64748b">xxxxx . yyyyy . zzzzz</text>
+</svg>

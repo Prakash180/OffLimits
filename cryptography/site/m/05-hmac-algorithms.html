@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512) · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html" class="active"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>05 · Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#f472b6,#db2777)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#f472b6;border-color:#f472b655;background:#f472b611">Module 05</span>
+  <h1 style="margin-top:18px">Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>The HMAC family — <code>HS256</code>, <code>HS384</code>, <code>HS512</code> — is one algorithm with three hash sizes bolted in. <strong>HMAC</strong> means <em>Hash-based Message Authentication Code</em>, and the formula is the heart of the whole module: <code>signature = HMAC_SHA(secret, base64url(header) + "." + base64url(payload))</code>. The number in the name (<code>256</code>/<code>384</code>/<code>512</code>) is simply <em>which SHA-2 hash</em> runs inside. Everything else — the symmetry, the trust model, the verification dance — is identical across all three.</p>
+<p>HMAC isn't a plain hash; it's a <em>keyed</em> construction. Internally it mixes the secret into the message in two passes (an inner and outer hash, each with the secret XOR'd against a pad), which is what stops an attacker from extending or forging a digest without knowing the key. The practical upshot you can hold in your head: <strong>the signature is the raw hash digest, and its length equals the digest size</strong> — HS256 → 32 bytes, HS384 → 48, HS512 → 64. A bigger hash means a longer signature and a marginally longer token; all three are cryptographically secure, and HS256 is the sensible default.</p>
+<p>The defining trait of the entire family is <strong>symmetry</strong>: there is exactly <em>one</em> secret, and it both signs and verifies. This is the same coin from Module 02, now seen as a <em>trust model</em>. Because verifying requires the same key as signing, <strong>whoever can verify can also forge</strong>. That's why HMAC fits a single party or a tight cluster of mutually trusted services sharing a secret out-of-band — and why it's the <em>wrong</em> choice the moment an untrusted third party needs to verify (that's RSA/ECDSA territory in later modules).</p>
+<p>Two operational realities round out the model. First, <strong>key length matters per algorithm</strong>: RFC 7518 recommends a key at least as long as the hash output, and PyJWT 2.13 emits an <code>InsecureKeyLengthWarning</code> for short keys. Second, <strong>rotation is just a list</strong>: sign new tokens with the newest secret, but accept verification against <code>[newest, …older]</code> so in-flight tokens keep working, then retire the old secret once its tokens have all expired.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>HMAC is a <strong>tamper-evident seal pressed from a secret die</strong>, and the SHA size is <em>how finely the die is engraved</em>. SHA-256 is a 32-notch die; SHA-512 is a 64-notch die — more notches, a longer impression, but the same kind of seal. Anyone holding a copy of the die can both <em>make</em> genuine seals and <em>check</em> them — which is exactly why you'd only ever share the die inside your own workshop, never with outside vendors.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li><code>jwt.encode(payload, SECRET, algorithm="HS384")</code> builds the <code>header.payload</code> string, with the header recording <code>"alg": "HS384"</code>.</li>
+<li>PyJWT runs <code>HMAC_SHA384(SECRET, "header.payload")</code>, producing a 48-byte digest.</li>
+<li>That digest is base64url-encoded and appended as the third segment; a <code>str</code> token is returned.</li>
+<li><code>jwt.decode(token, SECRET, algorithms=["HS384"])</code> re-computes the same HMAC over the received <code>header.payload</code> and constant-time-compares it to the signature.</li>
+<li>In <code>04_compare_signature_sizes.py</code>, the script base64url-<em>decodes</em> the signature segment and measures its raw byte length, proving 32/48/64 bytes for 256/384/512.</li>
+<li>In rotation (<code>06_secret_rotation_hmac.py</code>), <code>decode()</code> is retried across a candidate list of secrets until one verifies — the others raise <code>InvalidSignatureError</code> and are skipped.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>Across <code>01</code>–<code>03</code>, only the algorithm name changes — the API and round-trip are identical, hammering home that it's one family.</li>
+<li>In <code>01_hs256.py</code>, reading the unverified header shows <code>alg</code> matches the algorithm you signed with.</li>
+<li>In <code>04_compare_signature_sizes.py</code>, the measured signature lengths come out exactly 32/48/64 bytes — the digest size <em>is</em> the signature size.</li>
+<li>In <code>05_shared_secret_model.py</code>, two simulated parties using the <strong>same</strong> secret both verify successfully — and that's precisely why each could also forge.</li>
+<li>In <code>06_secret_rotation_hmac.py</code>, a token signed with the <em>old</em> secret still verifies during the overlap window because the verifier tries multiple candidate secrets.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li>❌ "HS512 is more secure than HS256, so always use it." Overstated — all three are secure; the difference is signature length, and HS256 is a fine default.</li>
+<li>❌ "The <code>256</code> is the key length." False — it's the <strong>SHA hash size</strong>; the key should be <em>at least</em> that many bytes (PyJWT 2.13 warns with <code>InsecureKeyLengthWarning</code> if shorter).</li>
+<li>❌ "I can give the verify secret to third parties to verify tokens." Dangerous — with HMAC, verify == sign, so they could forge. Use RSA/ECDSA for that.</li>
+<li>❌ "Rotating secrets means an instant cutover." False — you accept a <em>list</em> of secrets during overlap, then drop the old one once its tokens expire.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-05-hmac-algorithms-hs256-hs384-hs512">🔑 Module 05 — HMAC Algorithms (<code>HS256</code> / <code>HS384</code> / <code>HS512</code>)</h1>
+<blockquote>
+<p>The shared-secret family. One key signs <strong>and</strong> verifies. Simple, fast, and
+perfect when the same party (or tightly trusted services) issues and checks
+tokens.</p>
+</blockquote>
+<hr />
+<h2 id="what-is-hmac-signing">🧠 What is HMAC signing?</h2>
+<p>HMAC stands for <strong>Hash-based Message Authentication Code</strong>. For JWTs it works
+like this:</p>
+<div class="codehl"><pre><span></span><code>signature = HMAC_SHA(secret, base64url(header) + &quot;.&quot; + base64url(payload))
+</code></pre></div>
+
+<p>The number in the algorithm name is the SHA-2 hash used inside:</p>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Hash</th>
+<th>Digest / signature size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HS256</code></td>
+<td>SHA-256</td>
+<td>32 bytes (256 bits)</td>
+</tr>
+<tr>
+<td><code>HS384</code></td>
+<td>SHA-384</td>
+<td>48 bytes (384 bits)</td>
+</tr>
+<tr>
+<td><code>HS512</code></td>
+<td>SHA-512</td>
+<td>64 bytes (512 bits)</td>
+</tr>
+</tbody>
+</table>
+<p>HMAC is <strong>symmetric</strong>: there is exactly one secret. Because verifying and
+signing both need that same secret, <strong>anyone who can verify can also forge</strong>.
+That is the defining trait — and limitation — of this family.</p>
+<blockquote>
+<p>🔐 <strong>Naming note:</strong> <code>HS</code> = <strong>H</strong>MAC + <strong>S</strong>HA. <code>HS256</code> = HMAC using SHA-256.</p>
+</blockquote>
+<hr />
+<h2 id="the-shared-secret-trust-model">🗺️ The shared-secret trust model</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    subgraph Trusted Boundary
+        A[Issuer] -- &quot;sign with secret 🔑&quot; --&gt; T[JWT]
+        T -- &quot;verify with same secret 🔑&quot; --&gt; B[Verifier]
+    end
+    A -. shares secret out-of-band .-&gt; B
+    note[&quot;Same secret on both sides:&lt;br/&gt;verify == sign&quot;]</div></div>
+<p>Both sides hold the <strong>same</strong> secret, exchanged ahead of time over a trusted
+channel. Guard that secret like a password.</p>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it shows</th>
+<th>Run command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><a href="#ex-01_hs256">01_hs256.py</a></td>
+<td>Encode/decode with <code>HS256</code>; read the header <code>alg</code></td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/01_hs256.py</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><a href="#ex-02_hs384">02_hs384.py</a></td>
+<td>Same round-trip with <code>HS384</code></td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/02_hs384.py</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><a href="#ex-03_hs512">03_hs512.py</a></td>
+<td>Same round-trip with <code>HS512</code></td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/03_hs512.py</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><a href="#ex-04_compare_signature_sizes">04_compare_signature_sizes.py</a></td>
+<td>Signature byte length per algorithm = digest size</td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/04_compare_signature_sizes.py</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><a href="#ex-05_shared_secret_model">05_shared_secret_model.py</a></td>
+<td>One secret signs <em>and</em> verifies; two simulated parties</td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/05_shared_secret_model.py</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><a href="#ex-06_secret_rotation_hmac">06_secret_rotation_hmac.py</a></td>
+<td>Accept multiple secrets during rotation via a candidate loop</td>
+<td><code>.venv/bin/python pyjwt-course/05-hmac-algorithms/06_secret_rotation_hmac.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run them all:</p>
+<div class="codehl"><pre><span></span><code><span class="c1"># from the repo root: /home/astro/catalyst/jwt-test</span>
+<span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/05-hmac-algorithms/*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="key-takeaways">✨ Key takeaways</h2>
+<ul>
+<li><strong>One secret, both directions.</strong> With HMAC, <em>can verify == can sign</em>.</li>
+<li><strong>Bigger hash ⇒ bigger signature.</strong> <code>HS256</code>→32B, <code>HS384</code>→48B, <code>HS512</code>→64B.
+  <code>HS256</code> is a perfectly secure, common default.</li>
+<li><strong>Rotation = a list of accepted secrets.</strong> Sign with the newest, verify
+  against <code>[newest, …older]</code>, then drop the oldest once its tokens expire.</li>
+</ul>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li>🚫 <strong>Short/weak secrets.</strong> RFC 7518 recommends a key at least as long as the
+  hash output (≥32/48/64 bytes for HS256/384/512). PyJWT 2.13 emits an
+  <code>InsecureKeyLengthWarning</code> for short keys — use long, random secrets.</li>
+<li>🚫 <strong>Sharing the secret too widely.</strong> Every holder can mint valid tokens.
+  If untrusted third parties must verify, you want <strong>RSA</strong> (Module 06), not HMAC.</li>
+<li>🚫 <strong>Algorithm mismatch.</strong> You must list the <em>exact</em> algorithm in
+  <code>algorithms=</code> (e.g. <code>["HS384"]</code>), and never accept <code>["none"]</code>.</li>
+<li>🚫 <strong>Hard-coding secrets in source.</strong> Load from a secret manager / env var.</li>
+</ul>
+<hr />
+<h2 id="next">➡️ Next</h2>
+<p>When the same secret on both sides is no longer acceptable — because you need
+others to verify but <em>not</em> sign — move on to
+<a href="06-rsa-algorithms.html">Module 06 — RSA algorithms</a>.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 6 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_hs256" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>HS256</b><span>01_hs256.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01_hs256.py — Signing and verifying a JWT with HS256.</p>
+<p>HS256 = "HMAC using SHA-256". It is a <em>symmetric</em> (shared-secret) algorithm:
+the SAME secret string is used to both create (sign) and verify the token.</p>
+<p>Mental model:
+    signature = HMAC_SHA256(secret, base64url(header) + "." + base64url(payload))</p>
+<p>This is the most common "getting started" JWT algorithm because it needs
+nothing more than a single secret string — no key pairs, no PEM files.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_hs256.py</span></div><pre>Encoded JWT (HS256):
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRhIiwicm9sZSI6ImFkbWluIn0.yOP_bqvCHwZhcCb-s9BZF09gp9NaJGAFftbKzgPw6U8
+
+JOSE header: {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+Algorithm in header (alg): HS256
+
+Decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_hs256.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01_hs256.py — Signing and verifying a JWT with HS256.</span>
+
+<span class="sd">HS256 = &quot;HMAC using SHA-256&quot;. It is a *symmetric* (shared-secret) algorithm:</span>
+<span class="sd">the SAME secret string is used to both create (sign) and verify the token.</span>
+
+<span class="sd">Mental model:</span>
+<span class="sd">    signature = HMAC_SHA256(secret, base64url(header) + &quot;.&quot; + base64url(payload))</span>
+
+<span class="sd">This is the most common &quot;getting started&quot; JWT algorithm because it needs</span>
+<span class="sd">nothing more than a single secret string — no key pairs, no PEM files.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># A secret only the signer (and trusted verifiers) should know.</span>
+<span class="c1"># In production this MUST be long, random, and stored securely. We use a</span>
+<span class="c1"># 64+ byte secret so it satisfies even HS512&#39;s recommended key length.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-keep-me-safe-please-and-make-it-nice-and-long&quot;</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+<span class="c1"># --- Encode (sign) -------------------------------------------------------</span>
+<span class="c1"># jwt.encode(payload, key, algorithm) returns a compact JWT string.</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded JWT (HS256):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Inspect the header WITHOUT verifying -------------------------------</span>
+<span class="c1"># The header is just base64url-encoded JSON; anyone can read it.</span>
+<span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;JOSE header:&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Algorithm in header (alg):&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">])</span>  <span class="c1"># -&gt; &quot;HS256&quot;</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Decode (verify) -----------------------------------------------------</span>
+<span class="c1"># We must pass the SAME secret and list the algorithm(s) we accept.</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Decoded payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/01_hs256.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_hs384">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Hs384</b><span>02_hs384.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02_hs384.py — Signing and verifying a JWT with HS384.</p>
+<p>HS384 = "HMAC using SHA-384". Identical workflow to HS256, but the underlying
+hash function is SHA-384 instead of SHA-256. The only thing that changes in
+your code is the <code>algorithm=</code> / <code>algorithms=</code> value.</p>
+<p>A larger hash produces a larger signature (see 04_compare_signature_sizes.py),
+which gives a wider security margin at a small size cost.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_hs384.py</span></div><pre>Encoded JWT (HS384):
+eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRhIiwicm9sZSI6ImFkbWluIn0.t7fyxVfFFsj6C1MzYUDhldd7QVMXWTytt5hzILGgezMKynXFSoXTk34NalTuhKw6
+
+Algorithm in header (alg): HS384
+
+Decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_hs384.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02_hs384.py — Signing and verifying a JWT with HS384.</span>
+
+<span class="sd">HS384 = &quot;HMAC using SHA-384&quot;. Identical workflow to HS256, but the underlying</span>
+<span class="sd">hash function is SHA-384 instead of SHA-256. The only thing that changes in</span>
+<span class="sd">your code is the `algorithm=` / `algorithms=` value.</span>
+
+<span class="sd">A larger hash produces a larger signature (see 04_compare_signature_sizes.py),</span>
+<span class="sd">which gives a wider security margin at a small size cost.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># 64+ bytes: long enough for HS384&#39;s recommended 48-byte key length.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-keep-me-safe-please-and-make-it-nice-and-long&quot;</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+<span class="c1"># --- Encode with HS384 ---------------------------------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS384&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded JWT (HS384):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># The header now records HS384 as the algorithm.</span>
+<span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Algorithm in header (alg):&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">])</span>  <span class="c1"># -&gt; &quot;HS384&quot;</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Decode with HS384 ---------------------------------------------------</span>
+<span class="c1"># Note: you MUST list &quot;HS384&quot; in algorithms=, not &quot;HS256&quot;.</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS384&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Decoded payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/02_hs384.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_hs512">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Hs512</b><span>03_hs512.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03_hs512.py — Signing and verifying a JWT with HS512.</p>
+<p>HS512 = "HMAC using SHA-512". The strongest member of the HMAC/SHA-2 family
+supported by JWT. Same code, bigger hash, bigger signature.</p>
+<p>When should you reach for HS512 over HS256? Honestly, HS256 is already
+plenty for most apps. HS512 buys you a larger security margin and is handy
+when policy/compliance asks for SHA-512, at the cost of a slightly longer
+token.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_hs512.py</span></div><pre>Encoded JWT (HS512):
+eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjoiYWRhIiwicm9sZSI6ImFkbWluIn0.2sYJIO5gVGfBiz5rFgEnYQvgiE3UFY28DMGBz8RUZxXeYZLmmvJcDeVq9tZlt-m2o3J89UWsju2dHtfBGH3RKw
+
+Algorithm in header (alg): HS512
+
+Decoded payload: {&#x27;user&#x27;: &#x27;ada&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_hs512.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03_hs512.py — Signing and verifying a JWT with HS512.</span>
+
+<span class="sd">HS512 = &quot;HMAC using SHA-512&quot;. The strongest member of the HMAC/SHA-2 family</span>
+<span class="sd">supported by JWT. Same code, bigger hash, bigger signature.</span>
+
+<span class="sd">When should you reach for HS512 over HS256? Honestly, HS256 is already</span>
+<span class="sd">plenty for most apps. HS512 buys you a larger security margin and is handy</span>
+<span class="sd">when policy/compliance asks for SHA-512, at the cost of a slightly longer</span>
+<span class="sd">token.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># 64+ bytes: satisfies HS512&#39;s recommended 64-byte key length.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-keep-me-safe-please-and-make-it-nice-and-long&quot;</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+<span class="c1"># --- Encode with HS512 ---------------------------------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS512&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded JWT (HS512):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Algorithm in header (alg):&quot;</span><span class="p">,</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">])</span>  <span class="c1"># -&gt; &quot;HS512&quot;</span>
+<span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># --- Decode with HS512 ---------------------------------------------------</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS512&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Decoded payload:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/03_hs512.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_compare_signature_sizes">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Compare Signature Sizes</b><span>04_compare_signature_sizes.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04_compare_signature_sizes.py — How big is each HMAC signature?</p>
+<p>A JWT has three dot-separated parts:  header.payload.signature
+Each part is base64url-encoded. The signature is the raw output of the HMAC
+function, which is exactly as long as the underlying hash digest:</p>
+<div class="codehl"><pre><span></span><code>HS256 -&gt; SHA-256 -&gt; 256 bits -&gt; 32 bytes
+HS384 -&gt; SHA-384 -&gt; 384 bits -&gt; 48 bytes
+HS512 -&gt; SHA-512 -&gt; 512 bits -&gt; 64 bytes
+</code></pre></div>
+
+<p>This script signs the SAME payload with all three algorithms and measures the
+raw signature length to prove the relationship above.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_compare_signature_sizes.py</span></div><pre>Raw HMAC signature size = the hash digest size:
+
+  HS256: 32 bytes (256 bits)  -&gt; matches SHA-256 digest: True
+  HS384: 48 bytes (384 bits)  -&gt; matches SHA-384 digest: True
+  HS512: 64 bytes (512 bits)  -&gt; matches SHA-512 digest: True
+
+Takeaway: a stronger hash =&gt; longer signature =&gt; slightly longer token.
+All three are secure; HS256 is the common default.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_compare_signature_sizes.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04_compare_signature_sizes.py — How big is each HMAC signature?</span>
+
+<span class="sd">A JWT has three dot-separated parts:  header.payload.signature</span>
+<span class="sd">Each part is base64url-encoded. The signature is the raw output of the HMAC</span>
+<span class="sd">function, which is exactly as long as the underlying hash digest:</span>
+
+<span class="sd">    HS256 -&gt; SHA-256 -&gt; 256 bits -&gt; 32 bytes</span>
+<span class="sd">    HS384 -&gt; SHA-384 -&gt; 384 bits -&gt; 48 bytes</span>
+<span class="sd">    HS512 -&gt; SHA-512 -&gt; 512 bits -&gt; 64 bytes</span>
+
+<span class="sd">This script signs the SAME payload with all three algorithms and measures the</span>
+<span class="sd">raw signature length to prove the relationship above.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># 64+ bytes so HS256/384/512 are all happy with the key length.</span>
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-keep-me-safe-please-and-make-it-nice-and-long&quot;</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;ada&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_decode</span><span class="p">(</span><span class="n">segment</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode a base64url string, restoring any stripped &#39;=&#39; padding.&quot;&quot;&quot;</span>
+    <span class="c1"># JWT strips base64url padding; we add it back before decoding.</span>
+    <span class="n">padding</span> <span class="o">=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">segment</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">segment</span> <span class="o">+</span> <span class="n">padding</span><span class="p">)</span>
+
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Raw HMAC signature size = the hash digest size:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">alg</span><span class="p">,</span> <span class="n">expected_bytes</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="mi">32</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;HS384&quot;</span><span class="p">,</span> <span class="mi">48</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;HS512&quot;</span><span class="p">,</span> <span class="mi">64</span><span class="p">)]:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="n">alg</span><span class="p">)</span>
+
+    <span class="c1"># The signature is the 3rd part of the compact token.</span>
+    <span class="n">signature_segment</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">raw_signature</span> <span class="o">=</span> <span class="n">b64url_decode</span><span class="p">(</span><span class="n">signature_segment</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">alg</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw_signature</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;2</span><span class="si">}</span><span class="s2"> bytes &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw_signature</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">8</span><span class="si">}</span><span class="s2"> bits)  &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;-&gt; matches SHA-</span><span class="si">{</span><span class="n">alg</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="si">}</span><span class="s2"> digest: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw_signature</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">expected_bytes</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="p">)</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Takeaway: a stronger hash =&gt; longer signature =&gt; slightly longer token.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;All three are secure; HS256 is the common default.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/04_compare_signature_sizes.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_shared_secret_model">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Shared Secret Model</b><span>05_shared_secret_model.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05_shared_secret_model.py — The shared-secret (symmetric) trust model.</p>
+<p>HMAC is <em>symmetric</em>: there is exactly ONE secret, and that single secret is
+used for BOTH signing and verifying. Anyone who can verify a token can also
+forge one, because verifying and signing require the same key.</p>
+<p>That makes HMAC perfect when the SAME party (or a small set of mutually
+trusting services) both issues and checks the tokens. It is a poor fit when
+you need to let untrusted third parties verify but not mint tokens — that is
+RSA/ECDSA territory (see module 06).</p>
+<p>Below we simulate two parties, an Issuer and a Verifier, that share one
+secret out-of-band.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_shared_secret_model.py</span></div><pre>Issuer produced token:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcmRlcl9pZCI6NDJ9.-ySKfJMsx2_4NHtmqFcRJFCClpUKrIv5wzsbFlAlwFg 
+
+Verifier (correct secret) accepted payload: {&#x27;order_id&#x27;: 42} 
+
+Verifier (wrong secret) -&gt; InvalidSignatureError, as expected.
+
+Lesson: with HMAC, &#x27;can verify&#x27; == &#x27;can sign&#x27;. Guard the secret like
+a password and only share it with parties you fully trust.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_shared_secret_model.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05_shared_secret_model.py — The shared-secret (symmetric) trust model.</span>
+
+<span class="sd">HMAC is *symmetric*: there is exactly ONE secret, and that single secret is</span>
+<span class="sd">used for BOTH signing and verifying. Anyone who can verify a token can also</span>
+<span class="sd">forge one, because verifying and signing require the same key.</span>
+
+<span class="sd">That makes HMAC perfect when the SAME party (or a small set of mutually</span>
+<span class="sd">trusting services) both issues and checks the tokens. It is a poor fit when</span>
+<span class="sd">you need to let untrusted third parties verify but not mint tokens — that is</span>
+<span class="sd">RSA/ECDSA territory (see module 06).</span>
+
+<span class="sd">Below we simulate two parties, an Issuer and a Verifier, that share one</span>
+<span class="sd">secret out-of-band.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="c1"># The single secret both parties agreed on ahead of time (out-of-band).</span>
+<span class="c1"># Kept comfortably long (&gt;=32 bytes) to satisfy HS256 recommendations.</span>
+<span class="n">SHARED_SECRET</span> <span class="o">=</span> <span class="s2">&quot;the-one-secret-we-both-hold-and-keep-very-safe-indeed&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">issuer_sign</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The Issuer mints a token using the shared secret.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SHARED_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">verifier_check</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">secret</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The Verifier validates a token using the secret it holds.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+
+
+<span class="c1"># --- Happy path: both sides hold the SAME secret -------------------------</span>
+<span class="n">token</span> <span class="o">=</span> <span class="n">issuer_sign</span><span class="p">({</span><span class="s2">&quot;order_id&quot;</span><span class="p">:</span> <span class="mi">42</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Issuer produced token:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">verifier_check</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SHARED_SECRET</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifier (correct secret) accepted payload:&quot;</span><span class="p">,</span> <span class="n">result</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- Failure path: a verifier with the WRONG secret ----------------------</span>
+<span class="c1"># This proves verification truly depends on possessing the shared secret.</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">verifier_check</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="s2">&quot;an-attacker-guess-that-is-also-comfortably-long-but-wrong&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifier (wrong secret) -&gt; InvalidSignatureError, as expected.&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Lesson: with HMAC, &#39;can verify&#39; == &#39;can sign&#39;. Guard the secret like&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;a password and only share it with parties you fully trust.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/05_shared_secret_model.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_secret_rotation_hmac">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Secret Rotation HMAC</b><span>06_secret_rotation_hmac.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06_secret_rotation_hmac.py — Rotating HMAC secrets without downtime.</p>
+<p>Secrets should be rotated periodically. But you cannot flip every issuer and
+verifier to a new secret at the same instant — tokens signed with the OLD
+secret are still in flight and valid until they expire.</p>
+<p>The classic pattern: keep a SHORT LIST of accepted secrets. Sign new tokens
+with the newest secret, but when verifying, try each candidate secret in turn
+until one validates. Once all old tokens have expired, drop the old secret.</p>
+<p>This script demonstrates that fallback loop.</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_secret_rotation_hmac.py</span></div><pre>Verifying a token signed with the OLD secret:
+  -&gt; candidate #0 (&#x27;secret-v2-current-and-freshly-rotated-into-service&#x27;) did not match, trying next
+  -&gt; verified with candidate #1 (&#x27;secret-v1-being-retired-but-still-accepted-for-now&#x27;)
+{&#x27;sub&#x27;: &#x27;legacy-session&#x27;} 
+
+Verifying a token signed with the NEW secret:
+  -&gt; verified with candidate #0 (&#x27;secret-v2-current-and-freshly-rotated-into-service&#x27;)
+{&#x27;sub&#x27;: &#x27;fresh-session&#x27;} 
+
+Verifying a token signed with an UNKNOWN secret:
+  -&gt; candidate #0 (&#x27;secret-v2-current-and-freshly-rotated-into-service&#x27;) did not match, trying next
+  -&gt; candidate #1 (&#x27;secret-v1-being-retired-but-still-accepted-for-now&#x27;) did not match, trying next
+  -&gt; rejected: Token did not verify against any known secret
+
+Rotation recipe: sign with newest, verify against [newest, ...older],
+then remove the oldest secret once its tokens can no longer be valid.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_secret_rotation_hmac.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06_secret_rotation_hmac.py — Rotating HMAC secrets without downtime.</span>
+
+<span class="sd">Secrets should be rotated periodically. But you cannot flip every issuer and</span>
+<span class="sd">verifier to a new secret at the same instant — tokens signed with the OLD</span>
+<span class="sd">secret are still in flight and valid until they expire.</span>
+
+<span class="sd">The classic pattern: keep a SHORT LIST of accepted secrets. Sign new tokens</span>
+<span class="sd">with the newest secret, but when verifying, try each candidate secret in turn</span>
+<span class="sd">until one validates. Once all old tokens have expired, drop the old secret.</span>
+
+<span class="sd">This script demonstrates that fallback loop.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">jwt.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidSignatureError</span>
+
+<span class="c1"># Newest secret first; we always SIGN with the first entry.</span>
+<span class="c1"># Kept &gt;=32 bytes each to satisfy HS256&#39;s recommended key length.</span>
+<span class="n">OLD_SECRET</span> <span class="o">=</span> <span class="s2">&quot;secret-v1-being-retired-but-still-accepted-for-now&quot;</span>
+<span class="n">NEW_SECRET</span> <span class="o">=</span> <span class="s2">&quot;secret-v2-current-and-freshly-rotated-into-service&quot;</span>
+
+<span class="c1"># Ordered list of secrets a verifier will accept during the overlap window.</span>
+<span class="n">CANDIDATE_SECRETS</span> <span class="o">=</span> <span class="p">[</span><span class="n">NEW_SECRET</span><span class="p">,</span> <span class="n">OLD_SECRET</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">verify_with_rotation</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">candidates</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Try each candidate secret until one verifies; else raise.&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">secret</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">candidates</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; verified with candidate #</span><span class="si">{</span><span class="n">index</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">secret</span><span class="si">!r}</span><span class="s2">)&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">decoded</span>
+        <span class="k">except</span> <span class="n">InvalidSignatureError</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; candidate #</span><span class="si">{</span><span class="n">index</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">secret</span><span class="si">!r}</span><span class="s2">) did not match, trying next&quot;</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="n">InvalidSignatureError</span><span class="p">(</span><span class="s2">&quot;Token did not verify against any known secret&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># --- A token still signed with the OLD secret (in flight) ----------------</span>
+<span class="n">old_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;legacy-session&quot;</span><span class="p">},</span> <span class="n">OLD_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying a token signed with the OLD secret:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">verify_with_rotation</span><span class="p">(</span><span class="n">old_token</span><span class="p">,</span> <span class="n">CANDIDATE_SECRETS</span><span class="p">),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- A freshly issued token signed with the NEW secret -------------------</span>
+<span class="n">new_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;fresh-session&quot;</span><span class="p">},</span> <span class="n">NEW_SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying a token signed with the NEW secret:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">verify_with_rotation</span><span class="p">(</span><span class="n">new_token</span><span class="p">,</span> <span class="n">CANDIDATE_SECRETS</span><span class="p">),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># --- A token signed with a secret we no longer accept --------------------</span>
+<span class="n">bogus_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+    <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;evil&quot;</span><span class="p">},</span>
+    <span class="s2">&quot;secret-we-never-knew-and-will-never-accept-at-all&quot;</span><span class="p">,</span>
+    <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Verifying a token signed with an UNKNOWN secret:&quot;</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">verify_with_rotation</span><span class="p">(</span><span class="n">bogus_token</span><span class="p">,</span> <span class="n">CANDIDATE_SECRETS</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  -&gt; rejected:&quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Rotation recipe: sign with newest, verify against [newest, ...older],&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;then remove the oldest secret once its tokens can no longer be valid.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/05-hmac-algorithms/06_secret_rotation_hmac.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="04-custom-claims-and-validation.html"><div class="dir">← Previous</div><div class="ttl">04 · Module 04 · Custom Claims &amp; Validation Options</div></a><a class="next" href="06-rsa-algorithms.html"><div class="dir">Next →</div><div class="ttl">06 · Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

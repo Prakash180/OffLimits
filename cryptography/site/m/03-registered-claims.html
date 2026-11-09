@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 03 · Registered Claims · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html" class="active"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>03 · Module 03 · Registered Claims</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#34d399,#10b981)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#34d399;border-color:#34d39955;background:#34d39911">Module 03</span>
+  <h1 style="margin-top:18px">Module 03 · Registered Claims</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>The registered claims (<code>iss</code>, <code>sub</code>, <code>aud</code>, <code>exp</code>, <code>nbf</code>, <code>iat</code>, <code>jti</code>) are just <strong>seven short keys in the same plain JSON payload</strong> you met in Module 01 — nothing magical lives in them. What makes them special is a <em>shared agreement</em>: RFC 7519 reserves these three-letter names so every issuer and verifier on Earth interprets them the same way. PyJWT's job is to turn that social contract into automatic checks.</p>
+<p>The most important mental split is <strong>time claims vs. identity claims</strong>. The time claims (<code>exp</code>, <code>nbf</code>, and a future-dated <code>iat</code>) are checked <strong>automatically</strong> the moment they're present — PyJWT compares them against the current UTC clock with no arguments from you. The identity claims (<code>iss</code>, <code>aud</code>, <code>sub</code>) are <strong>opt-in</strong>: PyJWT ignores <code>iss</code> entirely unless you pass <code>issuer=</code>, ignores <code>aud</code> unless you pass <code>audience=</code>, and ignores <code>sub</code> unless you pass <code>subject=</code>. A token "valid for service A" sails through service B unless B explicitly verifies <code>aud</code>. This asymmetry is the single biggest source of real-world JWT bugs.</p>
+<p>Under the hood, time claims are stored as <strong>NumericDate</strong> — plain integer seconds since the Unix epoch, <em>not</em> ISO strings. When you hand PyJWT a timezone-aware <code>datetime</code>, it calls <code>.timestamp()</code> to flatten it to that integer. On decode, PyJWT compares <code>now &gt;= exp</code> (reject) and <code>now &lt; nbf</code> (reject). This is why naive <code>datetime.now()</code> is dangerous: without a timezone the epoch conversion is ambiguous and can drift by hours. Always use <code>datetime.now(timezone.utc)</code>.</p>
+<p><code>aud</code> has its own quirk worth picturing: matching is a <strong>set intersection</strong>. The token's <code>aud</code> may be a single string or a <em>list</em>, and your <code>audience=</code> may also be one or many. The token passes if the two sets overlap by <em>any</em> value. And <code>jti</code>? PyJWT will store and return it, but it does <strong>nothing</strong> automatically — replay protection is your application's job, typically a denylist keyed by the <code>jti</code> UUID.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>Think of a JWT as a <strong>boarding pass</strong>. The <code>exp</code> is the gate-closing time — the scanner rejects you automatically once it passes, no human judgment needed. The <code>aud</code> is the destination printed on the pass — but the gate agent only checks it if <em>they</em> care about destination; otherwise a London pass might scan fine at the Paris gate. The <code>jti</code> is the unique ticket number: it prevents the same pass being used twice <em>only if someone keeps a list of used numbers</em>.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li>You build a payload mixing identity claims (<code>iss</code>, <code>sub</code>, <code>aud</code>) and time claims (<code>exp</code>, <code>nbf</code>, <code>iat</code>), passing <code>datetime</code> objects for the times.</li>
+<li><code>jwt.encode()</code> converts each <code>datetime</code> to NumericDate (integer epoch seconds) and signs the result.</li>
+<li>On <code>jwt.decode()</code>, PyJWT first verifies the signature, then <strong>automatically</strong> checks <code>exp</code> (reject if <code>now &gt;= exp</code>) and <code>nbf</code> (reject if <code>now &lt; nbf</code>).</li>
+<li>PyJWT checks <code>iss</code>/<code>aud</code>/<code>sub</code> <strong>only</strong> because you passed <code>issuer=</code>, <code>audience=</code>, <code>subject=</code>; a mismatch raises <code>InvalidIssuerError</code> / <code>InvalidAudienceError</code> / <code>InvalidSubjectError</code>.</li>
+<li>For <code>aud</code>, PyJWT intersects the token's audience(s) with your accepted audience(s) and passes on any overlap.</li>
+<li><code>jti</code> is returned in the claims dict; the script's own in-memory denylist decides whether the token was already used.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>05_exp_expiration.py</code>, an already-past <code>exp</code> raises <code>ExpiredSignatureError</code> with <strong>no extra options</strong> — time enforcement is automatic.</li>
+<li>In <code>06_nbf_not_before.py</code>, a future <code>nbf</code> raises <code>ImmatureSignatureError</code> — the token is valid, just "not yet."</li>
+<li>In <code>01_iss_issuer.py</code>/<code>03_aud_audience.py</code>, <em>omitting</em> <code>issuer=</code>/<code>audience=</code> silently skips the check — the "aha" that identity claims are opt-in.</li>
+<li>In <code>04_aud_multiple.py</code>, a list <code>aud</code> passes when <em>any</em> member matches — set-intersection in action.</li>
+<li>In <code>08_jti_jwt_id.py</code>, the first use of a <code>jti</code> succeeds and the second is rejected <strong>only because the script tracks it</strong> — PyJWT didn't do that for you.</li>
+<li>In <code>10_datetime_handling.py</code>, a <code>datetime</code> and a raw <code>int</code> epoch produce equivalent claims — proof of the NumericDate conversion.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li>❌ "If a token has an <code>aud</code>, PyJWT checks it." False — only if you pass <code>audience=</code>; otherwise <code>aud</code> is ignored.</li>
+<li>❌ "<code>jti</code> gives me replay protection for free." False — PyJWT stores it; <em>you</em> must keep the denylist.</li>
+<li>❌ "<code>iat</code> is just informational and never blocks." Mostly true, but in PyJWT 2.13 a <strong>future</strong> <code>iat</code> raises <code>ImmatureSignatureError</code> (disable with <code>options={"verify_iat": False}</code>).</li>
+<li>❌ "Naive <code>datetime.now()</code> is fine for <code>exp</code>." False — without a timezone the epoch conversion is ambiguous; use <code>datetime.now(timezone.utc)</code>.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-03-registered-claims">🪪 Module 03 · Registered Claims</h1>
+<blockquote>
+<p>The JWT spec (<a href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1" target="_blank" rel="noopener">RFC 7519 §4.1</a>)
+reserves a handful of short, three-letter claim names with agreed-upon
+meanings. They are registered with <a href="https://www.iana.org/assignments/jwt/jwt.xhtml" target="_blank" rel="noopener">IANA</a>.
+This module walks through all <strong>seven</strong> and shows <em>exactly</em> how PyJWT 2.13
+validates each one.</p>
+</blockquote>
+<hr />
+<h2 id="the-big-idea">🧠 The big idea</h2>
+<p>A JWT payload is just JSON — you could put anything in it. The <strong>registered
+claims</strong> are the seven names everyone agrees on, so that issuers and verifiers
+speak the same language about <em>who</em>, <em>for whom</em>, and <em>when</em>.</p>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Name</th>
+<th>Meaning</th>
+<th>Validated by PyJWT?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>iss</code></td>
+<td>Issuer</td>
+<td>Who created the token</td>
+<td>Only if you pass <code>issuer=</code></td>
+</tr>
+<tr>
+<td><code>sub</code></td>
+<td>Subject</td>
+<td>Who the token is about</td>
+<td>Only if you pass <code>subject=</code></td>
+</tr>
+<tr>
+<td><code>aud</code></td>
+<td>Audience</td>
+<td>Who the token is for</td>
+<td>Only if you pass <code>audience=</code></td>
+</tr>
+<tr>
+<td><code>exp</code></td>
+<td>Expiration</td>
+<td>Reject at/after this time</td>
+<td>✅ Automatic when present</td>
+</tr>
+<tr>
+<td><code>nbf</code></td>
+<td>Not Before</td>
+<td>Reject before this time</td>
+<td>✅ Automatic when present</td>
+</tr>
+<tr>
+<td><code>iat</code></td>
+<td>Issued At</td>
+<td>When it was created</td>
+<td>Future <code>iat</code> rejected (<code>verify_iat</code>)</td>
+</tr>
+<tr>
+<td><code>jti</code></td>
+<td>JWT ID</td>
+<td>Unique token identifier</td>
+<td>❌ Your app must track it</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>🔑 <strong>Key distinction:</strong> the <em>time</em> claims (<code>exp</code>, <code>nbf</code>) are checked
+automatically. The <em>identity</em> claims (<code>iss</code>, <code>sub</code>, <code>aud</code>) are opt-in — you
+must tell PyJWT what value to expect, or it won't look at them at all.</p>
+</blockquote>
+<hr />
+<h2 id="how-pyjwt-validates-a-token">🌊 How PyJWT validates a token</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    A[jwt.decode called] --&gt; B{Signature valid?}
+    B -- no --&gt; X[InvalidSignatureError]
+    B -- yes --&gt; C{exp present?}
+    C -- yes &amp; past --&gt; X2[ExpiredSignatureError]
+    C -- ok --&gt; D{nbf present?}
+    D -- yes &amp; future --&gt; X3[ImmatureSignatureError]
+    D -- ok --&gt; E{issuer= passed?}
+    E -- yes &amp; mismatch --&gt; X4[InvalidIssuerError]
+    E -- ok --&gt; F{audience= passed?}
+    F -- yes &amp; no overlap --&gt; X5[InvalidAudienceError]
+    F -- ok --&gt; G{subject= passed?}
+    G -- yes &amp; mismatch --&gt; X6[InvalidSubjectError]
+    G -- ok --&gt; Z[Return decoded payload]</div></div>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it demonstrates</th>
+<th>Run it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_iss_issuer"><code>01_iss_issuer.py</code></a></td>
+<td>Set &amp; verify <code>iss</code>; <code>InvalidIssuerError</code> on mismatch</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/01_iss_issuer.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_sub_subject"><code>02_sub_subject.py</code></a></td>
+<td>Verify <code>sub</code> via <code>subject=</code>; mismatch &amp; missing-claim errors</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/02_sub_subject.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_aud_audience"><code>03_aud_audience.py</code></a></td>
+<td><code>aud</code> as a string; <code>InvalidAudienceError</code> on mismatch</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/03_aud_audience.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_aud_multiple"><code>04_aud_multiple.py</code></a></td>
+<td><code>aud</code> as a list; set-intersection matching</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/04_aud_multiple.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_exp_expiration"><code>05_exp_expiration.py</code></a></td>
+<td>Future vs. expired <code>exp</code>; <code>ExpiredSignatureError</code></td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/05_exp_expiration.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_nbf_not_before"><code>06_nbf_not_before.py</code></a></td>
+<td>Future vs. past <code>nbf</code>; <code>ImmatureSignatureError</code></td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/06_nbf_not_before.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_iat_issued_at"><code>07_iat_issued_at.py</code></a></td>
+<td><code>iat</code> is informational; custom freshness policy</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/07_iat_issued_at.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_jti_jwt_id"><code>08_jti_jwt_id.py</code></a></td>
+<td><code>jti</code> with <code>uuid4</code>; in-memory denylist / replay defense</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/08_jti_jwt_id.py</code></td>
+</tr>
+<tr>
+<td>09</td>
+<td><a href="#ex-09_all_claims_together"><code>09_all_claims_together.py</code></a></td>
+<td>One token, all 7 claims, every check enabled</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/09_all_claims_together.py</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><a href="#ex-10_datetime_handling"><code>10_datetime_handling.py</code></a></td>
+<td><code>datetime</code> → NumericDate conversion; int epoch too</td>
+<td><code>.venv/bin/python pyjwt-course/03-registered-claims/10_datetime_handling.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run the whole module:</p>
+<div class="codehl"><pre><span></span><code><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>pyjwt-course/03-registered-claims/0*.py<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;== </span><span class="nv">$f</span><span class="s2"> ==&quot;</span><span class="p">;</span><span class="w"> </span>.venv/bin/python<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$f</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h2 id="key-takeaways">✅ Key takeaways</h2>
+<ul>
+<li><strong>Time claims are automatic.</strong> If <code>exp</code>/<code>nbf</code> are present, PyJWT enforces
+  them with no extra arguments.</li>
+<li><strong>Identity claims are opt-in.</strong> Without <code>issuer=</code>, <code>audience=</code>, or
+  <code>subject=</code>, PyJWT will happily ignore <code>iss</code>, <code>aud</code>, and <code>sub</code>.</li>
+<li><strong><code>aud</code> matching is set intersection.</strong> A token valid for many audiences
+  passes if <em>any</em> accepted value is present.</li>
+<li><strong><code>datetime</code> objects are first-class.</strong> Pass timezone-aware datetimes; PyJWT
+  converts them to epoch seconds (NumericDate).</li>
+<li><strong><code>jti</code> is yours to police.</strong> PyJWT stores it; replay protection is your job.</li>
+</ul>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li>🕳️ <strong>Forgetting <code>audience=</code>.</strong> A token minted for service A will pass at
+  service B unless B verifies <code>aud</code>. Always check it.</li>
+<li>🕳️ <strong>Naive datetimes.</strong> <code>datetime.now()</code> (no tz) is ambiguous. Use
+  <code>datetime.now(timezone.utc)</code>.</li>
+<li>🕳️ <strong>Misjudging <code>iat</code>.</strong> In PyJWT 2.13 a <em>future</em> <code>iat</code> raises
+  <code>ImmatureSignatureError</code> (disable via <code>options={"verify_iat": False}</code>). It is
+  still informational for <em>age</em> checks — enforce those yourself.</li>
+<li>🕳️ <strong>Treating <code>jti</code> as automatic replay protection.</strong> Without a denylist it
+  does nothing.</li>
+<li>🕳️ <strong><code>exp</code> too far out.</strong> Long-lived tokens are a security risk; prefer short
+  lifetimes plus refresh.</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 10 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_iss_issuer" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>ISS Issuer</b><span>01_iss_issuer.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01 · The <code>iss</code> (issuer) registered claim.</p>
+<p>The <code>iss</code> claim identifies <em>who</em> issued the token. It is a free-form string —
+typically a URL or a stable identifier for your auth server (e.g.
+<code>"https://auth.example.com"</code>).</p>
+<p>PyJWT does not validate <code>iss</code> automatically. You opt in by passing
+<code>issuer="..."</code> to :func:<code>jwt.decode</code>. When you do, PyJWT compares the token's
+<code>iss</code> against the expected value and raises
+:class:<code>jwt.InvalidIssuerError</code> on a mismatch.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/01_iss_issuer.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_iss_issuer.py</span></div><pre>Encoded token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyLTEyMyJ9.HDmm1KHLS2Tnojld4WqQo4ZosDOEn1QHjorXYvLHe9c
+
+[OK] Issuer matched. Decoded payload:
+     {&#x27;iss&#x27;: &#x27;https://auth.example.com&#x27;, &#x27;sub&#x27;: &#x27;user-123&#x27;}
+
+[EXPECTED FAILURE] InvalidIssuerError raised:
+     Invalid issuer
+    The token&#x27;s `iss` did not match the expected issuer.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_iss_issuer.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01 · The `iss` (issuer) registered claim.</span>
+
+<span class="sd">The `iss` claim identifies *who* issued the token. It is a free-form string —</span>
+<span class="sd">typically a URL or a stable identifier for your auth server (e.g.</span>
+<span class="sd">``&quot;https://auth.example.com&quot;``).</span>
+
+<span class="sd">PyJWT does not validate `iss` automatically. You opt in by passing</span>
+<span class="sd">``issuer=&quot;...&quot;`` to :func:`jwt.decode`. When you do, PyJWT compares the token&#39;s</span>
+<span class="sd">`iss` against the expected value and raises</span>
+<span class="sd">:class:`jwt.InvalidIssuerError` on a mismatch.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/01_iss_issuer.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">EXPECTED_ISSUER</span> <span class="o">=</span> <span class="s2">&quot;https://auth.example.com&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># --- Encode a token that declares its issuer -------------------------</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="n">EXPECTED_ISSUER</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token:&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+
+    <span class="c1"># --- Happy path: decode with the matching expected issuer ------------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">issuer</span><span class="o">=</span><span class="n">EXPECTED_ISSUER</span><span class="p">,</span>  <span class="c1"># opt in to issuer validation</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Issuer matched. Decoded payload:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="c1"># --- Failure path: expect a *different* issuer -----------------------</span>
+    <span class="c1"># PyJWT compares token[&#39;iss&#39;] to the value we pass; a mismatch raises.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">issuer</span><span class="o">=</span><span class="s2">&quot;https://evil.example.com&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidIssuerError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] InvalidIssuerError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    The token&#39;s `iss` did not match the expected issuer.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/01_iss_issuer.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_sub_subject">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>SUB Subject</b><span>02_sub_subject.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02 · The <code>sub</code> (subject) registered claim.</p>
+<p>The <code>sub</code> claim identifies the <em>principal</em> the token is about — usually the
+user ID. It should be unique and stable within the issuer's namespace.</p>
+<p>Since PyJWT 2.x you can validate it by passing <code>subject="..."</code> to
+:func:<code>jwt.decode</code>. A mismatch raises :class:<code>jwt.InvalidSubjectError</code>; if the
+token has no <code>sub</code> at all while you require one, PyJWT raises
+:class:<code>jwt.MissingRequiredClaimError</code>.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/02_sub_subject.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_sub_subject.py</span></div><pre>Encoded token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMyIsImlzcyI6Imh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbSJ9.376GU08kva1s-90wzYOWDY8M4UWNz8P1uAWB4vOllsw
+
+[OK] Subject matched. Decoded payload:
+     {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;iss&#x27;: &#x27;https://auth.example.com&#x27;}
+
+[EXPECTED FAILURE] InvalidSubjectError raised:
+     Invalid subject
+
+[EXPECTED FAILURE] MissingRequiredClaimError raised:
+     Token is missing the &quot;sub&quot; claim
+    `subject=` checks the value; `require` guarantees presence.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_sub_subject.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02 · The `sub` (subject) registered claim.</span>
+
+<span class="sd">The `sub` claim identifies the *principal* the token is about — usually the</span>
+<span class="sd">user ID. It should be unique and stable within the issuer&#39;s namespace.</span>
+
+<span class="sd">Since PyJWT 2.x you can validate it by passing ``subject=&quot;...&quot;`` to</span>
+<span class="sd">:func:`jwt.decode`. A mismatch raises :class:`jwt.InvalidSubjectError`; if the</span>
+<span class="sd">token has no `sub` at all while you require one, PyJWT raises</span>
+<span class="sd">:class:`jwt.MissingRequiredClaimError`.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/02_sub_subject.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">EXPECTED_SUBJECT</span> <span class="o">=</span> <span class="s2">&quot;user-123&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="n">EXPECTED_SUBJECT</span><span class="p">,</span> <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;https://auth.example.com&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token:&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+
+    <span class="c1"># --- Happy path: subject matches -------------------------------------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">subject</span><span class="o">=</span><span class="n">EXPECTED_SUBJECT</span><span class="p">,</span>  <span class="c1"># opt in to subject validation</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Subject matched. Decoded payload:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="c1"># --- Failure path: wrong expected subject ----------------------------</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">subject</span><span class="o">=</span><span class="s2">&quot;user-999&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">InvalidSubjectError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] InvalidSubjectError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="c1"># --- Failure path: token has no `sub` but we REQUIRE one -------------</span>
+    <span class="c1"># Important: passing `subject=` alone validates the VALUE when `sub` is</span>
+    <span class="c1"># present, but it does NOT force the claim to exist. To demand presence,</span>
+    <span class="c1"># combine it with options={&quot;require&quot;: [...]}.</span>
+    <span class="n">no_sub</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="s2">&quot;https://auth.example.com&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">no_sub</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">subject</span><span class="o">=</span><span class="n">EXPECTED_SUBJECT</span><span class="p">,</span>
+            <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;sub&quot;</span><span class="p">]},</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">MissingRequiredClaimError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] MissingRequiredClaimError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    `subject=` checks the value; `require` guarantees presence.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/02_sub_subject.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_aud_audience">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>AUD Audience</b><span>03_aud_audience.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03 · The <code>aud</code> (audience) registered claim — single string form.</p>
+<p>The <code>aud</code> claim names the <em>intended recipient(s)</em> of the token. A resource
+server should reject any token that was not minted for it.</p>
+<p>PyJWT validates <code>aud</code> only when you pass <code>audience="..."</code> to
+:func:<code>jwt.decode</code>. A mismatch raises :class:<code>jwt.InvalidAudienceError</code>.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/03_aud_audience.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_aud_audience.py</span></div><pre>Encoded token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwczovL2FwaS5leGFtcGxlLmNvbSIsInN1YiI6InVzZXItMTIzIn0.LH2FlwwNQUTCy-K-gDhqoUfOmyZNGp5KhT2AZfpGquE
+
+[OK] Audience matched. Decoded payload:
+     {&#x27;aud&#x27;: &#x27;https://api.example.com&#x27;, &#x27;sub&#x27;: &#x27;user-123&#x27;}
+
+[EXPECTED FAILURE] InvalidAudienceError raised:
+     Audience doesn&#x27;t match
+    Always verify `aud` so tokens can&#x27;t be replayed across services.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_aud_audience.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03 · The `aud` (audience) registered claim — single string form.</span>
+
+<span class="sd">The `aud` claim names the *intended recipient(s)* of the token. A resource</span>
+<span class="sd">server should reject any token that was not minted for it.</span>
+
+<span class="sd">PyJWT validates `aud` only when you pass ``audience=&quot;...&quot;`` to</span>
+<span class="sd">:func:`jwt.decode`. A mismatch raises :class:`jwt.InvalidAudienceError`.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/03_aud_audience.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">EXPECTED_AUDIENCE</span> <span class="o">=</span> <span class="s2">&quot;https://api.example.com&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># `aud` here is a single string (the most common case).</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">EXPECTED_AUDIENCE</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token:&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+
+    <span class="c1"># --- Happy path: audience matches ------------------------------------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">audience</span><span class="o">=</span><span class="n">EXPECTED_AUDIENCE</span><span class="p">,</span>  <span class="c1"># opt in to audience validation</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Audience matched. Decoded payload:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">)</span>
+
+    <span class="c1"># --- Failure path: this token was not minted for us ------------------</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;https://other-api.example.com&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAudienceError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] InvalidAudienceError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    Always verify `aud` so tokens can&#39;t be replayed across services.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/03_aud_audience.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_aud_multiple">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>AUD Multiple</b><span>04_aud_multiple.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04 · The <code>aud</code> claim as a <em>list</em> of audiences.</p>
+<p>RFC 7519 allows <code>aud</code> to be either a single string OR an array of strings. A
+token can therefore be valid for several services at once.</p>
+<p>Validation rule (set intersection): decoding succeeds if <strong>any</strong> audience the
+caller accepts is present in the token's <code>aud</code>. You can pass <code>audience=</code> as a
+single string or as a list/iterable of acceptable values.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/04_aud_multiple.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_aud_multiple.py</span></div><pre>Encoded token (aud is a list of 3 values).
+
+[OK] Single accepted audience matched one entry in the list:
+     [&#x27;https://api.example.com&#x27;, &#x27;https://reports.example.com&#x27;, &#x27;https://admin.example.com&#x27;]
+
+[OK] Caller&#x27;s accepted-list overlapped the token&#x27;s audience list.
+
+[EXPECTED FAILURE] InvalidAudienceError raised:
+     Audience doesn&#x27;t match
+    None of the accepted audiences appeared in the token&#x27;s `aud`.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_aud_multiple.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04 · The `aud` claim as a *list* of audiences.</span>
+
+<span class="sd">RFC 7519 allows `aud` to be either a single string OR an array of strings. A</span>
+<span class="sd">token can therefore be valid for several services at once.</span>
+
+<span class="sd">Validation rule (set intersection): decoding succeeds if **any** audience the</span>
+<span class="sd">caller accepts is present in the token&#39;s `aud`. You can pass ``audience=`` as a</span>
+<span class="sd">single string or as a list/iterable of acceptable values.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/04_aud_multiple.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># The token is intended for THREE audiences.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s2">&quot;https://api.example.com&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;https://reports.example.com&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;https://admin.example.com&quot;</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token (aud is a list of 3 values).&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- Caller accepts a single value that IS in the list ---------------</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">audience</span><span class="o">=</span><span class="s2">&quot;https://reports.example.com&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Single accepted audience matched one entry in the list:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;aud&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Caller passes a LIST of acceptable audiences --------------------</span>
+    <span class="c1"># Succeeds because the intersection with the token&#39;s `aud` is non-empty.</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">audience</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;https://admin.example.com&quot;</span><span class="p">,</span> <span class="s2">&quot;https://unrelated.example.com&quot;</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Caller&#39;s accepted-list overlapped the token&#39;s audience list.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- No overlap -&gt; failure -------------------------------------------</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">audience</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;https://nope.example.com&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAudienceError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] InvalidAudienceError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    None of the accepted audiences appeared in the token&#39;s `aud`.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/04_aud_multiple.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_exp_expiration">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>EXP Expiration</b><span>05_exp_expiration.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05 · The <code>exp</code> (expiration time) registered claim.</p>
+<p><code>exp</code> is a NumericDate (seconds since the Unix epoch) after which the token
+MUST be rejected. PyJWT verifies <code>exp</code> <em>by default</em> whenever the claim is
+present — no extra parameter needed.</p>
+<p>If the current time is at/after <code>exp</code>, PyJWT raises
+:class:<code>jwt.ExpiredSignatureError</code> (a subclass of <code>InvalidTokenError</code>).</p>
+<p>Best practice: build the value from a timezone-aware datetime.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/05_exp_expiration.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_exp_expiration.py</span></div><pre>[OK] Token with future `exp` decoded fine.
+     exp (epoch seconds): 1782853510
+
+[EXPECTED FAILURE] ExpiredSignatureError raised:
+     Signature has expired
+    `exp` is checked automatically; no decode parameter required.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_exp_expiration.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05 · The `exp` (expiration time) registered claim.</span>
+
+<span class="sd">`exp` is a NumericDate (seconds since the Unix epoch) after which the token</span>
+<span class="sd">MUST be rejected. PyJWT verifies `exp` *by default* whenever the claim is</span>
+<span class="sd">present — no extra parameter needed.</span>
+
+<span class="sd">If the current time is at/after `exp`, PyJWT raises</span>
+<span class="sd">:class:`jwt.ExpiredSignatureError` (a subclass of ``InvalidTokenError``).</span>
+
+<span class="sd">Best practice: build the value from a timezone-aware datetime.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/05_exp_expiration.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># --- Token valid for one more hour -----------------------------------</span>
+    <span class="n">fresh</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">fresh</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[OK] Token with future `exp` decoded fine.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     exp (epoch seconds):&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Token that already expired one hour ago -------------------------</span>
+    <span class="n">stale</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">stale</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] ExpiredSignatureError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    `exp` is checked automatically; no decode parameter required.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/05_exp_expiration.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_nbf_not_before">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>NBF Not Before</b><span>06_nbf_not_before.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06 · The <code>nbf</code> (not before) registered claim.</p>
+<p><code>nbf</code> is a NumericDate before which the token MUST NOT be accepted. It is the
+mirror image of <code>exp</code>: it makes a token <em>start</em> being valid at a future moment
+(handy for scheduled / time-locked credentials).</p>
+<p>PyJWT verifies <code>nbf</code> automatically when present. If "now" is earlier than
+<code>nbf</code>, it raises :class:<code>jwt.ImmatureSignatureError</code>.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/06_nbf_not_before.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_nbf_not_before.py</span></div><pre>[EXPECTED FAILURE] ImmatureSignatureError raised:
+     The token is not yet valid (nbf)
+    The token will only become valid 10 minutes from now.
+
+[OK] Token with past `nbf` decoded fine.
+     nbf (epoch seconds): 1782849310</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_nbf_not_before.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06 · The `nbf` (not before) registered claim.</span>
+
+<span class="sd">`nbf` is a NumericDate before which the token MUST NOT be accepted. It is the</span>
+<span class="sd">mirror image of `exp`: it makes a token *start* being valid at a future moment</span>
+<span class="sd">(handy for scheduled / time-locked credentials).</span>
+
+<span class="sd">PyJWT verifies `nbf` automatically when present. If &quot;now&quot; is earlier than</span>
+<span class="sd">`nbf`, it raises :class:`jwt.ImmatureSignatureError`.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/06_nbf_not_before.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># --- nbf in the FUTURE -&gt; token is not valid yet ---------------------</span>
+    <span class="n">future_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">future_token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ImmatureSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[EXPECTED FAILURE] ImmatureSignatureError raised:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    The token will only become valid 10 minutes from now.&quot;</span><span class="p">)</span>
+
+    <span class="c1"># --- nbf in the PAST -&gt; token is active ------------------------------</span>
+    <span class="n">active_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">active_token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[OK] Token with past `nbf` decoded fine.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     nbf (epoch seconds):&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;nbf&quot;</span><span class="p">])</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/06_nbf_not_before.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_iat_issued_at">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>IAT Issued At</b><span>07_iat_issued_at.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>07 · The <code>iat</code> (issued at) registered claim.</p>
+<p><code>iat</code> records <em>when</em> the token was created (a NumericDate). It is primarily
+<strong>informational</strong> — you can use it to compute a token's age or to reject very
+old tokens with your own logic.</p>
+<p>Behaviour notes for PyJWT 2.13:
+  * <code>iat</code> is decoded and made available in the payload.
+  * PyJWT treats <code>iat</code> like a "not before" hint: an <code>iat</code> in the FUTURE makes
+    the token immature and raises <code>ImmatureSignatureError</code>.
+  * You can switch that check off with <code>options={"verify_iat": False}</code> and/or
+    enforce your own freshness policy by comparing <code>iat</code> to "now".</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/07_iat_issued_at.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_iat_issued_at.py</span></div><pre>[OK] Decoded `iat`: 1782849910 -&gt; 2026-06-30T20:05:10+00:00
+
+[EXPECTED FAILURE] A future `iat` is treated as not-yet-valid:
+     The token is not yet valid (iat)
+
+[verify_iat=False] Decoded the future-iat token:
+     iat: 1814385910
+
+[CUSTOM POLICY] `iat` is implausibly far in the future
+    (about 365 days ahead of now).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_iat_issued_at.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;07 · The `iat` (issued at) registered claim.</span>
+
+<span class="sd">`iat` records *when* the token was created (a NumericDate). It is primarily</span>
+<span class="sd">**informational** — you can use it to compute a token&#39;s age or to reject very</span>
+<span class="sd">old tokens with your own logic.</span>
+
+<span class="sd">Behaviour notes for PyJWT 2.13:</span>
+<span class="sd">  * `iat` is decoded and made available in the payload.</span>
+<span class="sd">  * PyJWT treats `iat` like a &quot;not before&quot; hint: an `iat` in the FUTURE makes</span>
+<span class="sd">    the token immature and raises `ImmatureSignatureError`.</span>
+<span class="sd">  * You can switch that check off with ``options={&quot;verify_iat&quot;: False}`` and/or</span>
+<span class="sd">    enforce your own freshness policy by comparing `iat` to &quot;now&quot;.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/07_iat_issued_at.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="c1"># --- Normal: iat = now -----------------------------------------------</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="n">issued</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;iat&quot;</span><span class="p">],</span> <span class="n">tz</span><span class="o">=</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[OK] Decoded `iat`:&quot;</span><span class="p">,</span> <span class="n">decoded</span><span class="p">[</span><span class="s2">&quot;iat&quot;</span><span class="p">],</span> <span class="s2">&quot;-&gt;&quot;</span><span class="p">,</span> <span class="n">issued</span><span class="o">.</span><span class="n">isoformat</span><span class="p">())</span>
+
+    <span class="c1"># --- iat far in the FUTURE: PyJWT rejects it as immature -------------</span>
+    <span class="n">future</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">365</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">future</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ImmatureSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[EXPECTED FAILURE] A future `iat` is treated as not-yet-valid:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    &quot;</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+
+    <span class="c1"># --- Read it anyway by disabling just the iat check ------------------</span>
+    <span class="n">decoded_future</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">future</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_iat&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[verify_iat=False] Decoded the future-iat token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     iat:&quot;</span><span class="p">,</span> <span class="n">decoded_future</span><span class="p">[</span><span class="s2">&quot;iat&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Enforce your own freshness policy on top ------------------------</span>
+    <span class="c1"># Example: flag anything claiming to be issued more than 1 day ahead.</span>
+    <span class="n">age</span> <span class="o">=</span> <span class="n">decoded_future</span><span class="p">[</span><span class="s2">&quot;iat&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">now</span><span class="o">.</span><span class="n">timestamp</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">age</span> <span class="o">&gt;</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">total_seconds</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">[CUSTOM POLICY] `iat` is implausibly far in the future&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    (about </span><span class="si">{</span><span class="n">age</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">86400</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> days ahead of now).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/07_iat_issued_at.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_jti_jwt_id">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>JTI JWT ID</b><span>08_jti_jwt_id.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>08 · The <code>jti</code> (JWT ID) registered claim.</p>
+<p><code>jti</code> is a unique identifier for the token. Its purpose is to give each token
+an identity you can track — most importantly to <strong>prevent replay</strong> by keeping a
+denylist (or, for one-time tokens, an allowlist that is consumed on first use).</p>
+<p>PyJWT does NOT track <code>jti</code> for you; uniqueness/replay logic lives in your app.
+Below we simulate an in-memory denylist of already-used token IDs.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/08_jti_jwt_id.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_jti_jwt_id.py</span></div><pre>Issued a token with a unique `jti`.
+
+First presentation of the token:
+    [ACCEPTED] jti=49bf3346-fa7c-4d4f-9850-b69b19978c0a consumed for the first time.
+
+Second presentation of the SAME token (replay attempt):
+    [DENIED] jti=49bf3346-fa7c-4d4f-9850-b69b19978c0a was already used -&gt; possible replay!
+
+A brand-new token has a different `jti`, so it is accepted:
+    [ACCEPTED] jti=331ceb8d-99bc-44eb-89a8-8cb71db8d560 consumed for the first time.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_jti_jwt_id.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;08 · The `jti` (JWT ID) registered claim.</span>
+
+<span class="sd">`jti` is a unique identifier for the token. Its purpose is to give each token</span>
+<span class="sd">an identity you can track — most importantly to **prevent replay** by keeping a</span>
+<span class="sd">denylist (or, for one-time tokens, an allowlist that is consumed on first use).</span>
+
+<span class="sd">PyJWT does NOT track `jti` for you; uniqueness/replay logic lives in your app.</span>
+<span class="sd">Below we simulate an in-memory denylist of already-used token IDs.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/08_jti_jwt_id.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+<span class="c1"># A real system would use Redis / a database with TTLs. An in-memory set is</span>
+<span class="c1"># enough to demonstrate the idea.</span>
+<span class="n">USED_TOKEN_IDS</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">consume</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode a token and reject it if its `jti` has already been seen.&quot;&quot;&quot;</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="n">jti</span> <span class="o">=</span> <span class="n">payload</span><span class="p">[</span><span class="s2">&quot;jti&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">jti</span> <span class="ow">in</span> <span class="n">USED_TOKEN_IDS</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    [DENIED] jti=</span><span class="si">{</span><span class="n">jti</span><span class="si">}</span><span class="s2"> was already used -&gt; possible replay!&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">USED_TOKEN_IDS</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">jti</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    [ACCEPTED] jti=</span><span class="si">{</span><span class="n">jti</span><span class="si">}</span><span class="s2"> consumed for the first time.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Each token gets a fresh, collision-resistant id from uuid4().</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;jti&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Issued a token with a unique `jti`.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;First presentation of the token:&quot;</span><span class="p">)</span>
+    <span class="n">consume</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Second presentation of the SAME token (replay attempt):&quot;</span><span class="p">)</span>
+    <span class="n">consume</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">A brand-new token has a different `jti`, so it is accepted:&quot;</span><span class="p">)</span>
+    <span class="n">consume</span><span class="p">(</span><span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;jti&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">))</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/08_jti_jwt_id.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-09_all_claims_together">
+  <summary>
+    <span class="ix">09</span>
+    <span class="meta"><b>All Claims Together</b><span>09_all_claims_together.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>09 · All seven registered claims, together.</p>
+<p>This brings the whole module into one token:</p>
+<div class="codehl"><pre><span></span><code>iss  – who issued it
+sub  – who it&#39;s about
+aud  – who it&#39;s for
+exp  – when it stops being valid
+nbf  – when it starts being valid
+iat  – when it was issued
+jti  – its unique id
+</code></pre></div>
+
+<p>We then decode with <em>every</em> matching validation parameter switched on, so PyJWT
+checks the signature, <code>exp</code>, <code>nbf</code>, plus <code>iss</code>, <code>aud</code>, and <code>sub</code>.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/09_all_claims_together.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-8">▶ Output</button>
+        <button class="tab" data-pane="code-8">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-8">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-8">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 09_all_claims_together.py</span></div><pre>Encoded a token carrying all 7 registered claims.
+
+[OK] Fully validated. Claims:
+    iss  = https://auth.example.com
+    sub  = user-123
+    aud  = https://api.example.com
+    iat  = 1782849911
+    nbf  = 1782849906
+    exp  = 1782850811
+    jti  = 2a1b6f3f-2668-43b2-bff3-acd4c8f156e3</pre></div>
+      </div>
+      <div class="pane" data-pane="code-8">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">09_all_claims_together.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;09 · All seven registered claims, together.</span>
+
+<span class="sd">This brings the whole module into one token:</span>
+
+<span class="sd">    iss  – who issued it</span>
+<span class="sd">    sub  – who it&#39;s about</span>
+<span class="sd">    aud  – who it&#39;s for</span>
+<span class="sd">    exp  – when it stops being valid</span>
+<span class="sd">    nbf  – when it starts being valid</span>
+<span class="sd">    iat  – when it was issued</span>
+<span class="sd">    jti  – its unique id</span>
+
+<span class="sd">We then decode with *every* matching validation parameter switched on, so PyJWT</span>
+<span class="sd">checks the signature, `exp`, `nbf`, plus `iss`, `aud`, and `sub`.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/09_all_claims_together.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+<span class="n">ISSUER</span> <span class="o">=</span> <span class="s2">&quot;https://auth.example.com&quot;</span>
+<span class="n">SUBJECT</span> <span class="o">=</span> <span class="s2">&quot;user-123&quot;</span>
+<span class="n">AUDIENCE</span> <span class="o">=</span> <span class="s2">&quot;https://api.example.com&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;iss&quot;</span><span class="p">:</span> <span class="n">ISSUER</span><span class="p">,</span>
+        <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="n">SUBJECT</span><span class="p">,</span>
+        <span class="s2">&quot;aud&quot;</span><span class="p">:</span> <span class="n">AUDIENCE</span><span class="p">,</span>
+        <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
+        <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">-</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">5</span><span class="p">),</span>       <span class="c1"># already active</span>
+        <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">15</span><span class="p">),</span>      <span class="c1"># valid for 15 minutes</span>
+        <span class="s2">&quot;jti&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">()),</span>
+    <span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded a token carrying all 7 registered claims.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Decode with every check enabled. `exp`/`nbf` are automatic; `iss`,</span>
+    <span class="c1"># `aud`, `sub` are opted in via parameters.</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">token</span><span class="p">,</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+        <span class="n">issuer</span><span class="o">=</span><span class="n">ISSUER</span><span class="p">,</span>
+        <span class="n">audience</span><span class="o">=</span><span class="n">AUDIENCE</span><span class="p">,</span>
+        <span class="n">subject</span><span class="o">=</span><span class="n">SUBJECT</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;[OK] Fully validated. Claims:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;iss&quot;</span><span class="p">,</span> <span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="s2">&quot;aud&quot;</span><span class="p">,</span> <span class="s2">&quot;iat&quot;</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">,</span> <span class="s2">&quot;jti&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;4</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">decoded</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-8">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/09_all_claims_together.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-10_datetime_handling">
+  <summary>
+    <span class="ix">10</span>
+    <span class="meta"><b>Datetime Handling</b><span>10_datetime_handling.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>10 · How PyJWT handles datetimes for the time-based claims.</p>
+<p>The time claims (<code>exp</code>, <code>nbf</code>, <code>iat</code>) are defined by RFC 7519 as <strong>NumericDate</strong>
+values: the number of seconds since 1970-01-01T00:00:00Z (the Unix epoch),
+ignoring leap seconds.</p>
+<p>You almost never compute that number by hand. PyJWT accepts a
+:class:<code>datetime.datetime</code> object directly and converts it to epoch seconds for
+you. A plain <code>int</code> epoch works too. This script proves all three are
+equivalent.</p>
+<p>Always use timezone-AWARE datetimes (<code>datetime.now(timezone.utc)</code>); a naive
+datetime is interpreted as UTC by PyJWT but is ambiguous in your own code.</p>
+<p>Run me:
+    .venv/bin/python pyjwt-course/03-registered-claims/10_datetime_handling.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-9">▶ Output</button>
+        <button class="tab" data-pane="code-9">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-9">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-9">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 10_datetime_handling.py</span></div><pre>(a) datetime input -&gt; stored as epoch int: 1782853511
+    type in decoded payload: int
+
+(b) int epoch input -&gt; stored unchanged: 1782853511
+
+Both represent the same expiry second: True
+Restored expiry: 2026-06-30T21:05:11+00:00
+
+All time claims as ints: {&#x27;iat&#x27;: 1782849911, &#x27;nbf&#x27;: 1782849911, &#x27;exp&#x27;: 1782850211}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-9">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">10_datetime_handling.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;10 · How PyJWT handles datetimes for the time-based claims.</span>
+
+<span class="sd">The time claims (`exp`, `nbf`, `iat`) are defined by RFC 7519 as **NumericDate**</span>
+<span class="sd">values: the number of seconds since 1970-01-01T00:00:00Z (the Unix epoch),</span>
+<span class="sd">ignoring leap seconds.</span>
+
+<span class="sd">You almost never compute that number by hand. PyJWT accepts a</span>
+<span class="sd">:class:`datetime.datetime` object directly and converts it to epoch seconds for</span>
+<span class="sd">you. A plain ``int`` epoch works too. This script proves all three are</span>
+<span class="sd">equivalent.</span>
+
+<span class="sd">Always use timezone-AWARE datetimes (``datetime.now(timezone.utc)``); a naive</span>
+<span class="sd">datetime is interpreted as UTC by PyJWT but is ambiguous in your own code.</span>
+
+<span class="sd">Run me:</span>
+<span class="sd">    .venv/bin/python pyjwt-course/03-registered-claims/10_datetime_handling.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;super-secret-shared-key-please-change-me&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="n">exp_dt</span> <span class="o">=</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># --- (a) pass a datetime object --------------------------------------</span>
+    <span class="n">token_dt</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;u&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">exp_dt</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded_dt</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_dt</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;(a) datetime input -&gt; stored as epoch int:&quot;</span><span class="p">,</span> <span class="n">decoded_dt</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;    type in decoded payload:&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">decoded_dt</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">])</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+
+    <span class="c1"># --- (b) pass the equivalent int epoch directly ----------------------</span>
+    <span class="n">exp_epoch</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">exp_dt</span><span class="o">.</span><span class="n">timestamp</span><span class="p">())</span>
+    <span class="n">token_int</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;u&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">exp_epoch</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded_int</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_int</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">(b) int epoch input -&gt; stored unchanged:&quot;</span><span class="p">,</span> <span class="n">decoded_int</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- They describe the same instant ----------------------------------</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Both represent the same expiry second:&quot;</span><span class="p">,</span> <span class="n">decoded_dt</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">decoded_int</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">])</span>
+
+    <span class="c1"># --- Round-trip back to a human-readable datetime --------------------</span>
+    <span class="n">restored</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">decoded_dt</span><span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">],</span> <span class="n">tz</span><span class="o">=</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Restored expiry:&quot;</span><span class="p">,</span> <span class="n">restored</span><span class="o">.</span><span class="n">isoformat</span><span class="p">())</span>
+
+    <span class="c1"># --- All three time claims accept datetimes simultaneously ----------</span>
+    <span class="n">full</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
+            <span class="s2">&quot;nbf&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span>
+            <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">5</span><span class="p">),</span>
+        <span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">decoded_full</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">full</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">All time claims as ints:&quot;</span><span class="p">,</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">decoded_full</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;iat&quot;</span><span class="p">,</span> <span class="s2">&quot;nbf&quot;</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">)})</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-9">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/03-registered-claims/10_datetime_handling.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="02-getting-started-hs256.html"><div class="dir">← Previous</div><div class="ttl">02 · Module 02 · Getting Started with HS256</div></a><a class="next" href="04-custom-claims-and-validation.html"><div class="dir">Next →</div><div class="ttl">04 · Module 04 · Custom Claims &amp; Validation Options</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

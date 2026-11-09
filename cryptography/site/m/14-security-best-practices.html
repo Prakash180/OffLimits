@@ -1,0 +1,1463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 14 · Security Best Practices · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html" class="active"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>14 · Module 14 · Security Best Practices</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#60a5fa,#2563eb)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#60a5fa;border-color:#60a5fa55;background:#60a5fa11">Module 14</span>
+  <h1 style="margin-top:18px">Module 14 · Security Best Practices</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>A JWT is a <strong>bearer credential</strong>: the verifier treats whoever presents a valid token <em>as</em> the subject, no questions asked. That makes the verifier's configuration the entire security boundary — and almost every JWT disaster reduces to <strong>one root cause: the verifier trusted something the attacker controls.</strong> The token header, the <code>alg</code> field, the claims, the absence of an expiry — all of these are attacker-influenced inputs until a <em>correct</em> signature check proves otherwise.</p>
+<p>The most famous footgun is <strong><code>alg: none</code></strong>. The JOSE spec defines an "unsecured" token type with an empty signature. A naive verifier that reads the algorithm <em>from the token's own header</em> will happily accept a token whose signature was simply deleted — letting an attacker forge any payload. The defense is to <strong>never</strong> let the token choose its own algorithm: always pass an explicit <code>algorithms=[...]</code> allowlist to <code>jwt.decode</code>. PyJWT refuses <code>none</code> unless you dangerously opt in, but you should pin regardless.</p>
+<p>The subtlest attack is <strong>RS256→HS256 algorithm confusion</strong>. An RS256 server verifies with a <strong>public</strong> key that is, by design, known to everyone. HS256 is <strong>symmetric</strong> — the same key signs and verifies. So an attacker takes the public key, uses its PEM bytes as an <strong>HMAC secret</strong>, forges an HS256 token, and a server misconfigured to allow <code>algorithms=["HS256","RS256"]</code> "verifies" it using that public key as the HMAC secret. Forgery complete, no private key required. Module 14 demonstrates all three outcomes for real: a deliberately <em>vulnerable</em> hand-rolled verifier accepts the forgery; <strong>PyJWT 2.13 blocks it at the API</strong> by refusing to use an asymmetric PEM as an HMAC secret (<code>InvalidKeyError</code>); and the fix you own — pinning <code>algorithms=["RS256"]</code> — rejects it outright. Don't lean on the library's guard alone; pin explicitly.</p>
+<p>The remaining rules follow the same logic. <strong>Decoding without verification is plumbing, not trust</strong> — <code>verify_signature=False</code> is only for reading a <code>kid</code> to <em>choose</em> a key, never for reading claims you'll act on. <strong><code>exp</code> is mandatory</strong> — a token with no expiry is valid forever, so use <code>options={"require": ["exp"]}</code> and short TTLs. <strong>Secrets must be strong</strong> — generate them with <code>secrets.token_urlsafe</code>, store them in env/secret managers, and rotate. And critically: <strong>the payload is readable by anyone.</strong> Signing is <em>not</em> encryption; base64url is reversible with no key, so never place passwords, PII, or secrets in claims.</p>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>A JWT is a backstage wristband: security only checks the <em>band</em>, never your face. <code>alg: none</code> is a band with the hologram peeled off that a lazy guard still waves through. Algorithm confusion is photocopying the <em>public</em> hologram pattern (the public key) and gluing it onto a fake band that a confused guard "validates" against that same pattern. And the payload being readable is the band's printed text — anyone standing near you can read your name and section, so you'd never write your PIN on it.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li>An attacker takes a legitimate token, swaps the header to <code>{"alg":"none"}</code>, edits the payload, and drops the signature segment.</li>
+<li>A verifier that trusts the token's own <code>alg</code> accepts it — the forgery succeeds against the naive path.</li>
+<li>For algorithm confusion: the server's RSA <strong>public</strong> key is exported as PEM and handed to the attacker (it's meant to be public).</li>
+<li>The attacker computes <code>HMAC-SHA256("header.payload", public_pem_bytes)</code> and base64url-encodes it — a valid HS256 signature <em>for that secret</em>.</li>
+<li>The deliberately vulnerable verifier recomputes the same HMAC with the public PEM and the signatures match → forged token accepted.</li>
+<li><code>jwt.decode(forged, public_pem, algorithms=["HS256","RS256"])</code> is rejected by modern PyJWT with <code>InvalidKeyError</code> (asymmetric PEM can't be an HMAC secret).</li>
+<li>Pinning <code>algorithms=["RS256"]</code> rejects the forged HS256 token while genuine RS256 tokens still verify.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li><code>01_alg_none_attack.py</code>: PyJWT <em>refuses</em> <code>none</code> unless you explicitly opt in — the safe default in action.</li>
+<li><code>03_algorithm_confusion_rsa_hmac.py</code>: the three labeled results — <strong>forgery accepted</strong> (vulnerable), <strong><code>InvalidKeyError</code></strong> (PyJWT guard), <strong>rejected</strong> (your <code>RS256</code> pin) — tell the whole story.</li>
+<li><code>04_never_trust_unverified_claims.py</code>: claims pulled with <code>verify_signature=False</code> show <code>role=admin</code> with <em>no</em> signature check — proof that decoding ≠ trusting.</li>
+<li><code>07_dont_put_secrets_in_payload.py</code>: the payload is extracted with <strong>no key at all</strong>, hammering home that base64url is not encryption.</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"PyJWT blocks confusion attacks, so I'm safe."</strong> Its guard helps, but you must still pin <code>algorithms=[...]</code> explicitly — never echo the token's own <code>alg</code>.</li>
+<li><strong>"<code>verify_signature=False</code> is fine for reading claims."</strong> Only for routing (picking a key by <code>kid</code>); never trust those claims.</li>
+<li><strong>"Signing hides the payload."</strong> Signing proves integrity/authenticity; the payload stays readable by anyone.</li>
+<li><strong>"A long-lived token is convenient and harmless."</strong> No <code>exp</code> (or a huge one) means a leaked token works forever — short TTL plus <code>require: ['exp']</code>.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-14-security-best-practices">🛡️ Module 14 · Security Best Practices</h1>
+<blockquote>
+<p><em>"JWTs are easy to use and easy to misuse. This module is about the second part."</em></p>
+</blockquote>
+<p>A JWT is a <strong>bearer credential</strong>: whoever holds a valid one is treated as the
+subject. That power makes configuration mistakes catastrophic. This module walks
+through the classic JWT footguns — <code>alg: none</code>, algorithm confusion, trusting
+unverified claims, missing expiry, weak secrets, leaky payloads — and shows the
+exact defense for each, with code that actually demonstrates both the attack and
+the fix.</p>
+<hr />
+<h2 id="the-threat-model-at-a-glance">🎯 The threat model at a glance</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart TD
+    A[Attacker gets a token&lt;br/&gt;or your public key] --&gt; B{Verifier misconfigured?}
+    B --&gt;|allows &#x27;none&#x27;| C[Strip signature, forge payload]
+    B --&gt;|allows HS256 + pubkey| D[RS256→HS256 confusion forgery]
+    B --&gt;|reads alg from header| E[Attacker picks the algorithm]
+    B --&gt;|trusts unverified claims| F[role=admin with no signature check]
+    B --&gt;|no exp check| G[Leaked token works forever]
+    B --&gt;|pinned + validated| H[✅ Rejected]
+    style H fill:#1b5e20,color:#fff</div></div>
+<p>Every red path collapses to <strong>one root cause: the verifier trusted something the
+attacker controls.</strong> The fix is always: <em>pin the algorithm, verify the claims,
+guard the keys.</em></p>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>Attack / topic</th>
+<th>Run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_alg_none_attack"><code>01_alg_none_attack.py</code></a></td>
+<td>The unsecured <code>alg: none</code> token; PyJWT refuses it unless you dangerously opt in</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/01_alg_none_attack.py</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_always_pin_algorithms"><code>02_always_pin_algorithms.py</code></a></td>
+<td>Why <code>algorithms=[...]</code> is mandatory; never echo the token's own <code>alg</code></td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/02_always_pin_algorithms.py</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_algorithm_confusion_rsa_hmac"><code>03_algorithm_confusion_rsa_hmac.py</code></a></td>
+<td><strong>RS256→HS256 forgery</strong> that actually succeeds vs. a vulnerable verifier, then the fix</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/03_algorithm_confusion_rsa_hmac.py</code></td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_never_trust_unverified_claims"><code>04_never_trust_unverified_claims.py</code></a></td>
+<td><code>verify_signature=False</code> is for routing only, never for trust</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/04_never_trust_unverified_claims.py</code></td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_expiration_is_mandatory"><code>05_expiration_is_mandatory.py</code></a></td>
+<td>No <code>exp</code> = forever; enforce short TTL + <code>require: ['exp']</code></td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/05_expiration_is_mandatory.py</code></td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_secret_management"><code>06_secret_management.py</code></a></td>
+<td>Strong secrets via <code>secrets.token_urlsafe</code>, env vars, weak-vs-strong entropy</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/06_secret_management.py</code></td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="#ex-07_dont_put_secrets_in_payload"><code>07_dont_put_secrets_in_payload.py</code></a></td>
+<td>The payload is readable by anyone — extract claims with no key</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/07_dont_put_secrets_in_payload.py</code></td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="#ex-08_security_checklist"><code>08_security_checklist.py</code></a></td>
+<td>A printable, actionable JWT security checklist</td>
+<td><code>.venv/bin/python pyjwt-course/14-security-best-practices/08_security_checklist.py</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Run everything at once:
+<code>bash
+for f in pyjwt-course/14-security-best-practices/0*.py; do .venv/bin/python "$f"; done</code></p>
+</blockquote>
+<hr />
+<h2 id="the-star-of-the-show-algorithm-confusion-script-03">💥 The star of the show: algorithm confusion (script 03)</h2>
+<p>The exploit in one breath: an RS256 server's <strong>public key is public</strong>. HS256 is
+<strong>symmetric</strong> (same key signs and verifies). So an attacker uses the public key
+as an HMAC secret to forge an HS256 token — and a server that allows
+<code>algorithms=["HS256","RS256"]</code> with that public key "verifies" it.</p>
+<p>Script 03 demonstrates <strong>all three outcomes for real</strong>:</p>
+<ol>
+<li>✅ <strong>Forgery succeeds</strong> against a naive/legacy verifier (models the
+   historically vulnerable behavior).</li>
+<li>🛡️ <strong>Modern PyJWT blocks it</strong> — it refuses to use an asymmetric PEM as an
+   HMAC secret (<code>InvalidKeyError</code>). A genuinely valuable built-in defense.</li>
+<li>🔒 <strong>The fix you own:</strong> pin <code>algorithms=["RS256"]</code> only → the forged token is
+   rejected with <code>InvalidAlgorithmError</code>, while genuine RS256 tokens still pass.</li>
+</ol>
+<blockquote>
+<p>Don't rely on the library's guard alone — <strong>pin your algorithms explicitly.</strong></p>
+</blockquote>
+<hr />
+<h2 id="key-takeaways">🔑 Key takeaways</h2>
+<ol>
+<li><strong>Pin the algorithm.</strong> <code>jwt.decode(token, key, algorithms=["RS256"])</code> — exact
+   and minimal. Never read <code>alg</code> from the token, never include <code>none</code>, never mix
+   symmetric and asymmetric.</li>
+<li><strong>Verify the claims.</strong> <code>exp</code> (and <code>require</code> it), <code>aud</code>, <code>iss</code>. Fail closed.</li>
+<li><strong>Guard the keys.</strong> Strong random secrets, env/secret-manager storage,
+   rotation, <code>kid</code> allowlists, asymmetric keys for third-party verification.</li>
+<li><strong>The payload is public.</strong> Signing ≠ encryption. Never place secrets/PII in
+   claims.</li>
+<li><strong>Unverified ≠ trusted.</strong> Decode-without-verify is plumbing for choosing a
+   key; trust only flows from a signature you validated.</li>
+</ol>
+<hr />
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li>Allowing <code>none</code> "just for testing" and shipping it.</li>
+<li>Copy-pasting <code>algorithms=[jwt.get_unverified_header(t)["alg"]]</code> from a blog.</li>
+<li>Forgetting <code>audience=</code>/<code>issuer=</code>, so a valid token <em>from another app</em> passes.</li>
+<li>Long-lived (or eternal) access tokens with no revocation plan.</li>
+<li>Treating base64url as if it were encryption.</li>
+</ul>
+<p>➡️ Next: <a href="15-real-world-fastapi-oauth.html">Module 15 · Real-World FastAPI &amp; OAuth2/OIDC</a>
+— apply all of this in a production-shaped auth flow.</p></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 8 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_alg_none_attack" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Alg None Attack</b><span>01_alg_none_attack.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The JWT spec defines an <em>unsecured</em> token: <code>"alg": "none"</code> with an EMPTY
+signature. It exists for cases where integrity is guaranteed by another layer,
+but it is a notorious footgun: if a verifier accepts <code>none</code>, an attacker can
+strip the signature, rewrite the payload, and walk straight in.</p>
+<p>This script shows:</p>
+<ol>
+<li>How to (deliberately) build a <code>none</code> token with PyJWT.</li>
+<li>That PyJWT REFUSES to decode it unless you <em>explicitly</em> opt in with
+   <code>algorithms=["none"]</code> AND disable signature verification.</li>
+<li>Why you must NEVER allow <code>none</code> for tokens from untrusted sources.</li>
+</ol>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/01_alg_none_attack.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_alg_none_attack.py</span></div><pre>======================================================================
+STEP 1 — Build an unsecured &#x27;alg: none&#x27; token (no signature)
+======================================================================
+none token: eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ1c2VyIjoiYXR0YWNrZXIiLCJyb2xlIjoiYWRtaW4ifQ.
+ends with empty signature segment? True
+
+======================================================================
+STEP 2 — A safe verifier pins a real algorithm -&gt; rejected
+======================================================================
+algorithms=[&#x27;HS256&#x27;] -&gt; rejected: InvalidAlgorithmError: The specified alg value is not allowed
+Because &#x27;none&#x27; is not in the allow-list, the token is refused.
+
+======================================================================
+STEP 3 — Even allowing &#x27;none&#x27; requires disabling signature checks
+======================================================================
+algorithms=[&#x27;none&#x27;] alone -&gt; InvalidSignatureError: Signature verification failed
+
+Only with verify_signature=False does it decode: {&#x27;user&#x27;: &#x27;attacker&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+Notice: ZERO cryptographic proof was checked. Anyone wrote this.
+
+======================================================================
+THE LESSON
+======================================================================
+- NEVER include &#x27;none&#x27; in `algorithms=[...]` for untrusted input.
+- An attacker would flip role-&gt;admin, drop the signature, and submit.
+- Always pin the exact signing algorithm(s) you actually issue.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_alg_none_attack.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">01 · The &quot;alg: none&quot; attack — unsecured JWTs</span>
+<span class="sd">=============================================</span>
+
+<span class="sd">The JWT spec defines an *unsecured* token: ``&quot;alg&quot;: &quot;none&quot;`` with an EMPTY</span>
+<span class="sd">signature. It exists for cases where integrity is guaranteed by another layer,</span>
+<span class="sd">but it is a notorious footgun: if a verifier accepts ``none``, an attacker can</span>
+<span class="sd">strip the signature, rewrite the payload, and walk straight in.</span>
+
+<span class="sd">This script shows:</span>
+
+<span class="sd">1. How to (deliberately) build a ``none`` token with PyJWT.</span>
+<span class="sd">2. That PyJWT REFUSES to decode it unless you *explicitly* opt in with</span>
+<span class="sd">   ``algorithms=[&quot;none&quot;]`` AND disable signature verification.</span>
+<span class="sd">3. Why you must NEVER allow ``none`` for tokens from untrusted sources.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/01_alg_none_attack.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 1 — Build an unsecured &#39;alg: none&#39; token (no signature)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># PyJWT lets you create one, but only when you pass algorithm=&quot;none&quot; and a</span>
+    <span class="c1"># None key. Note the token ENDS WITH A DOT: the signature segment is empty.</span>
+    <span class="n">none_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;attacker&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">},</span> <span class="kc">None</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;none token: </span><span class="si">{</span><span class="n">none_token</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ends with empty signature segment? </span><span class="si">{</span><span class="n">none_token</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 2 — A safe verifier pins a real algorithm -&gt; rejected&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">none_token</span><span class="p">,</span> <span class="s2">&quot;any-secret&quot;</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: none token accepted by an HS256 verifier?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAlgorithmError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;algorithms=[&#39;HS256&#39;] -&gt; rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Because &#39;none&#39; is not in the allow-list, the token is refused.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STEP 3 — Even allowing &#39;none&#39; requires disabling signature checks&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># PyJWT guards you twice: you must allow &quot;none&quot; AND turn off the signature</span>
+    <span class="c1"># verification, otherwise it still raises.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">none_token</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;none&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: decoded with just algorithms=[&#39;none&#39;]?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">DecodeError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;algorithms=[&#39;none&#39;] alone -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+        <span class="n">none_token</span><span class="p">,</span>
+        <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;none&quot;</span><span class="p">],</span>
+        <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">},</span>  <span class="c1"># explicit, scary opt-in</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Only with verify_signature=False does it decode: </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Notice: ZERO cryptographic proof was checked. Anyone wrote this.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE LESSON&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- NEVER include &#39;none&#39; in `algorithms=[...]` for untrusted input.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- An attacker would flip role-&gt;admin, drop the signature, and submit.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Always pin the exact signing algorithm(s) you actually issue.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/01_alg_none_attack.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_always_pin_algorithms">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Always Pin Algorithms</b><span>02_always_pin_algorithms.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p><code>jwt.decode()</code> REQUIRES an <code>algorithms=[...]</code> allow-list. This is not
+bureaucracy — it's the single most important line of defense against
+algorithm-substitution attacks (see script 03).</p>
+<p>The cardinal sin is to read the algorithm out of the <em>token's own header</em> and
+feed it back to <code>decode</code>. The header is attacker-controlled. If you trust it,
+the attacker chooses how their token gets verified.</p>
+<p>This script demonstrates:</p>
+<ol>
+<li>Decoding works when you pin the correct algorithm.</li>
+<li>Pinning the WRONG algorithm rejects the token.</li>
+<li>The dangerous anti-pattern: <code>algorithms=[unverified_header["alg"]]</code>.</li>
+</ol>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/02_always_pin_algorithms.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_always_pin_algorithms.py</span></div><pre>HS256 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhb...
+
+======================================================================
+GOOD — pin the exact algorithm you issued
+======================================================================
+algorithms=[&#x27;HS256&#x27;] -&gt; {&#x27;sub&#x27;: &#x27;alice&#x27;}
+
+======================================================================
+GOOD — pinning the wrong algorithm rejects the token
+======================================================================
+algorithms=[&#x27;HS512&#x27;] -&gt; rejected: InvalidAlgorithmError: The specified alg value is not allowed
+
+======================================================================
+DANGEROUS ANTI-PATTERN — echoing the token&#x27;s own &#x27;alg&#x27;
+======================================================================
+unverified header: {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+BAD CODE:  jwt.decode(token, key, algorithms=[unverified_header[&#x27;alg&#x27;]])
+Why it&#x27;s bad: the attacker picks &#x27;alg&#x27;, so they pick how you verify.
+It opens the door to the RS256-&gt;HS256 confusion attack (script 03).
+
+======================================================================
+RULE
+======================================================================
+Hard-code the algorithm(s) your system issues. Treat the token header
+as a routing hint at most (e.g. selecting a key by &#x27;kid&#x27;), never as
+the source of truth for which algorithm to verify with.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_always_pin_algorithms.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">02 · Always pin algorithms — never trust the token&#39;s own header</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">``jwt.decode()`` REQUIRES an ``algorithms=[...]`` allow-list. This is not</span>
+<span class="sd">bureaucracy — it&#39;s the single most important line of defense against</span>
+<span class="sd">algorithm-substitution attacks (see script 03).</span>
+
+<span class="sd">The cardinal sin is to read the algorithm out of the *token&#39;s own header* and</span>
+<span class="sd">feed it back to ``decode``. The header is attacker-controlled. If you trust it,</span>
+<span class="sd">the attacker chooses how their token gets verified.</span>
+
+<span class="sd">This script demonstrates:</span>
+
+<span class="sd">1. Decoding works when you pin the correct algorithm.</span>
+<span class="sd">2. Pinning the WRONG algorithm rejects the token.</span>
+<span class="sd">3. The dangerous anti-pattern: ``algorithms=[unverified_header[&quot;alg&quot;]]``.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/02_always_pin_algorithms.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;a-strong-shared-secret-at-least-32-bytes-long!!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HS256 token: </span><span class="si">{</span><span class="n">token</span><span class="p">[:</span><span class="mi">50</span><span class="p">]</span><span class="si">}</span><span class="s2">...</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GOOD — pin the exact algorithm you issued&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;algorithms=[&#39;HS256&#39;] -&gt; </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GOOD — pinning the wrong algorithm rejects the token&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS512&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: HS256 token verified under HS512?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidAlgorithmError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;algorithms=[&#39;HS512&#39;] -&gt; rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DANGEROUS ANTI-PATTERN — echoing the token&#39;s own &#39;alg&#39;&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="c1"># The header is NOT authenticated before verification; an attacker controls</span>
+    <span class="c1"># it. Reading alg from here and trusting it defeats the whole allow-list.</span>
+    <span class="n">unverified_header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;unverified header: </span><span class="si">{</span><span class="n">unverified_header</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;BAD CODE:  jwt.decode(token, key, algorithms=[unverified_header[&#39;alg&#39;]])&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Why it&#39;s bad: the attacker picks &#39;alg&#39;, so they pick how you verify.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;It opens the door to the RS256-&gt;HS256 confusion attack (script 03).</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RULE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Hard-code the algorithm(s) your system issues. Treat the token header&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;as a routing hint at most (e.g. selecting a key by &#39;kid&#39;), never as&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;the source of truth for which algorithm to verify with.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/02_always_pin_algorithms.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_algorithm_confusion_rsa_hmac">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>Algorithm Confusion RSA HMAC</b><span>03_algorithm_confusion_rsa_hmac.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>This is the most famous JWT attack. Setup:</p>
+<ul>
+<li>A server issues <strong>RS256</strong> tokens (asymmetric: private key signs, PUBLIC key
+  verifies). The public key is, by design, known to everyone.</li>
+<li>The server's verification is misconfigured to allow BOTH algorithms:
+  <code>algorithms=["HS256", "RS256"]</code> and it passes the <strong>RSA public key</strong> as the
+  verification key.</li>
+</ul>
+<p>The exploit: HS256 is <em>symmetric</em> — the same key signs and verifies. So the
+attacker takes the well-known <strong>public key</strong> and uses it as the <strong>HMAC secret</strong>
+to forge an HS256 token. The misconfigured server then "verifies" that token
+using the public key as the HMAC secret... and it matches. Forgery complete —
+no private key required.</p>
+<p>What this script demonstrates, all actually running:</p>
+<ol>
+<li><strong>Forgery SUCCEEDS</strong> against a naive verifier that treats the public key as
+   an HMAC secret (this models historically-vulnerable libraries / hand-rolled
+   verification).</li>
+<li><strong>PyJWT's built-in guard</strong> blocks the same bad config: modern PyJWT refuses
+   to use an asymmetric PEM as an HMAC secret (<code>InvalidKeyError</code>).</li>
+<li><strong>The real fix you control:</strong> pin <code>algorithms=["RS256"]</code> only — the forged
+   HS256 token is rejected outright.</li>
+</ol>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/03_algorithm_confusion_rsa_hmac.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_algorithm_confusion_rsa_hmac.py</span></div><pre>========================================================================
+SETUP — server issues RS256 tokens; public key is known to everyone
+========================================================================
+legit RS256 token: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhb...
+public key (shared with the world):
+  -----BEGIN PUBLIC KEY----- ... -----END PUBLIC KEY-----
+
+========================================================================
+ATTACK — forge an HS256 token using the PUBLIC KEY as the HMAC secret
+========================================================================
+forged HS256 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhd...
+forged payload claims: {&quot;sub&quot;:&quot;attacker&quot;,&quot;role&quot;:&quot;admin&quot;}
+
+========================================================================
+RESULT 1 — Vulnerable verifier (allows HS256 w/ public key) -&gt; FORGED IN
+========================================================================
+VULNERABLE SERVER ACCEPTED THE FORGERY: {&#x27;sub&#x27;: &#x27;attacker&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+&gt;&gt;&gt; Attacker is now &#x27;admin&#x27; without ever touching the private key. &lt;&lt;&lt;
+
+========================================================================
+RESULT 2 — Modern PyJWT GUARD blocks the same bad config
+========================================================================
+PyJWT refused: InvalidKeyError: The specified key is an asymmetric key or x509 certificate and should not be used as an HMAC secret.
+PyJWT proactively forbids asymmetric PEMs as HMAC secrets.
+
+========================================================================
+RESULT 3 — The fix YOU control: pin algorithms=[&#x27;RS256&#x27;] only
+========================================================================
+forged token rejected: InvalidAlgorithmError: The specified alg value is not allowed
+genuine RS256 token still verifies: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;user&#x27;}
+
+========================================================================
+DEFENSE SUMMARY
+========================================================================
+1. Pin EXACTLY the asymmetric algorithm you issue: algorithms=[&#x27;RS256&#x27;].
+2. Never include a symmetric alg (HS*) alongside an asymmetric one.
+3. Modern PyJWT also refuses asymmetric keys as HMAC secrets — but do
+   not rely on that alone; pin your algorithms explicitly.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_algorithm_confusion_rsa_hmac.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">03 · Algorithm-confusion attack — the classic RS256 -&gt; HS256 forgery</span>
+<span class="sd">=====================================================================</span>
+
+<span class="sd">This is the most famous JWT attack. Setup:</span>
+
+<span class="sd">* A server issues **RS256** tokens (asymmetric: private key signs, PUBLIC key</span>
+<span class="sd">  verifies). The public key is, by design, known to everyone.</span>
+<span class="sd">* The server&#39;s verification is misconfigured to allow BOTH algorithms:</span>
+<span class="sd">  ``algorithms=[&quot;HS256&quot;, &quot;RS256&quot;]`` and it passes the **RSA public key** as the</span>
+<span class="sd">  verification key.</span>
+
+<span class="sd">The exploit: HS256 is *symmetric* — the same key signs and verifies. So the</span>
+<span class="sd">attacker takes the well-known **public key** and uses it as the **HMAC secret**</span>
+<span class="sd">to forge an HS256 token. The misconfigured server then &quot;verifies&quot; that token</span>
+<span class="sd">using the public key as the HMAC secret... and it matches. Forgery complete —</span>
+<span class="sd">no private key required.</span>
+
+<span class="sd">What this script demonstrates, all actually running:</span>
+
+<span class="sd">1. **Forgery SUCCEEDS** against a naive verifier that treats the public key as</span>
+<span class="sd">   an HMAC secret (this models historically-vulnerable libraries / hand-rolled</span>
+<span class="sd">   verification).</span>
+<span class="sd">2. **PyJWT&#39;s built-in guard** blocks the same bad config: modern PyJWT refuses</span>
+<span class="sd">   to use an asymmetric PEM as an HMAC secret (``InvalidKeyError``).</span>
+<span class="sd">3. **The real fix you control:** pin ``algorithms=[&quot;RS256&quot;]`` only — the forged</span>
+<span class="sd">   HS256 token is rejected outright.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/03_algorithm_confusion_rsa_hmac.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hmac</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives</span><span class="w"> </span><span class="kn">import</span> <span class="n">serialization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cryptography.hazmat.primitives.asymmetric</span><span class="w"> </span><span class="kn">import</span> <span class="n">rsa</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">b64url_nopad</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64encode</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;=&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">forge_hs256_with_public_key</span><span class="p">(</span><span class="n">payload_json</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attacker: build an HS256 token using the RSA *public key* as the secret.&quot;&quot;&quot;</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">b64url_nopad</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;{&quot;alg&quot;:&quot;HS256&quot;,&quot;typ&quot;:&quot;JWT&quot;}&#39;</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">b64url_nopad</span><span class="p">(</span><span class="n">payload_json</span><span class="p">)</span>
+    <span class="n">signing_input</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+    <span class="c1"># The public key PEM bytes ARE the HMAC secret here — that&#39;s the attack.</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">hmac</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">public_pem</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">),</span> <span class="n">signing_input</span><span class="p">,</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">)</span><span class="o">.</span><span class="n">digest</span><span class="p">()</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">payload</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">b64url_nopad</span><span class="p">(</span><span class="n">sig</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">vulnerable_verify</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A naive/legacy verifier that allows HS256 with the public key as secret.</span>
+
+<span class="sd">    This reproduces the verification logic of historically-vulnerable JWT</span>
+<span class="sd">    libraries (pre-mitigation) that did not refuse asymmetric keys for HMAC.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">header_seg</span><span class="p">,</span> <span class="n">payload_seg</span><span class="p">,</span> <span class="n">sig_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+    <span class="n">signing_input</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">header_seg</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">payload_seg</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;ascii&quot;</span><span class="p">)</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="n">hmac</span><span class="o">.</span><span class="n">new</span><span class="p">(</span>
+        <span class="n">public_pem</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">),</span> <span class="n">signing_input</span><span class="p">,</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">digest</span><span class="p">()</span>
+    <span class="n">presented</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">sig_seg</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">sig_seg</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">hmac</span><span class="o">.</span><span class="n">compare_digest</span><span class="p">(</span><span class="n">expected</span><span class="p">,</span> <span class="n">presented</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;signature mismatch&quot;</span><span class="p">)</span>
+    <span class="n">payload_json</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">payload_seg</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">payload_seg</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+    <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">payload_json</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># --- The legitimate server&#39;s RSA key pair ---</span>
+    <span class="n">private_key</span> <span class="o">=</span> <span class="n">rsa</span><span class="o">.</span><span class="n">generate_private_key</span><span class="p">(</span><span class="n">public_exponent</span><span class="o">=</span><span class="mi">65537</span><span class="p">,</span> <span class="n">key_size</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">private_pem</span> <span class="o">=</span> <span class="n">private_key</span><span class="o">.</span><span class="n">private_bytes</span><span class="p">(</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+        <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PrivateFormat</span><span class="o">.</span><span class="n">PKCS8</span><span class="p">,</span>
+        <span class="n">encryption_algorithm</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">NoEncryption</span><span class="p">(),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="n">public_pem</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">private_key</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">public_bytes</span><span class="p">(</span>
+            <span class="n">encoding</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">Encoding</span><span class="o">.</span><span class="n">PEM</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="n">serialization</span><span class="o">.</span><span class="n">PublicFormat</span><span class="o">.</span><span class="n">SubjectPublicKeyInfo</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SETUP — server issues RS256 tokens; public key is known to everyone&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">legit</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">},</span> <span class="n">private_pem</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;RS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;legit RS256 token: </span><span class="si">{</span><span class="n">legit</span><span class="p">[:</span><span class="mi">50</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;public key (shared with the world):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="n">public_pem</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot; ... &quot;</span> <span class="o">+</span> <span class="n">public_pem</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ATTACK — forge an HS256 token using the PUBLIC KEY as the HMAC secret&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">forged</span> <span class="o">=</span> <span class="n">forge_hs256_with_public_key</span><span class="p">(</span><span class="sa">b</span><span class="s1">&#39;{&quot;sub&quot;:&quot;attacker&quot;,&quot;role&quot;:&quot;admin&quot;}&#39;</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;forged HS256 token: </span><span class="si">{</span><span class="n">forged</span><span class="p">[:</span><span class="mi">50</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;forged payload claims: {&quot;sub&quot;:&quot;attacker&quot;,&quot;role&quot;:&quot;admin&quot;}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RESULT 1 — Vulnerable verifier (allows HS256 w/ public key) -&gt; FORGED IN&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">vulnerable_verify</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;VULNERABLE SERVER ACCEPTED THE FORGERY: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&gt;&gt;&gt; Attacker is now &#39;admin&#39; without ever touching the private key. &lt;&lt;&lt;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># noqa: BLE001</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;unexpected: vulnerable verifier rejected: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RESULT 2 — Modern PyJWT GUARD blocks the same bad config&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># The &quot;foolish&quot; server config: allow HS256+RS256, key = public PEM.</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: PyJWT accepted the forgery!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidKeyError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;PyJWT refused: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PyJWT proactively forbids asymmetric PEMs as HMAC secrets.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;PyJWT refused: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RESULT 3 — The fix YOU control: pin algorithms=[&#39;RS256&#39;] only&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: forged HS256 token verified under RS256 pin!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;forged token rejected: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="c1"># And the genuine RS256 token still verifies under the strict pin.</span>
+    <span class="n">good</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">legit</span><span class="p">,</span> <span class="n">public_pem</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;RS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;genuine RS256 token still verifies: </span><span class="si">{</span><span class="n">good</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DEFENSE SUMMARY&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1. Pin EXACTLY the asymmetric algorithm you issue: algorithms=[&#39;RS256&#39;].&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2. Never include a symmetric alg (HS*) alongside an asymmetric one.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;3. Modern PyJWT also refuses asymmetric keys as HMAC secrets — but do&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   not rely on that alone; pin your algorithms explicitly.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/03_algorithm_confusion_rsa_hmac.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_never_trust_unverified_claims">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Never Trust Unverified Claims</b><span>04_never_trust_unverified_claims.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>Sometimes you need to peek inside a token BEFORE you can verify it — most often
+to read the <code>kid</code> (key id) or <code>iss</code> so you know <em>which</em> key to fetch. PyJWT
+supports this via <code>jwt.get_unverified_header()</code> and
+<code>jwt.decode(..., options={"verify_signature": False})</code>.</p>
+<p>The iron rule: <strong>unverified claims may be used to ROUTE, never to TRUST.</strong>
+An attacker can put anything in an unverified payload. Authorization decisions
+(is this user an admin? which tenant?) must come only from a token whose
+signature you have validated.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/04_never_trust_unverified_claims.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_never_trust_unverified_claims.py</span></div><pre>========================================================================
+LEGITIMATE USE — peek at the header to choose a verification key
+========================================================================
+unverified header: {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;kid&#x27;: &#x27;key-2026-06&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}
+-&gt; route: fetch signing key with kid=&#x27;key-2026-06&#x27; (then verify).
+
+========================================================================
+LEGITIMATE USE — peek at unverified claims for routing only
+========================================================================
+unverified claims: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;user&#x27;, &#x27;kid_hint&#x27;: &#x27;tenant-A&#x27;}
+OK to use &#x27;iss&#x27;/&#x27;kid&#x27; to look up a key. NOT ok to trust &#x27;role&#x27; yet.
+
+========================================================================
+THE DANGER — an attacker forges claims in an UNSIGNED-CHECK read
+========================================================================
+attacker&#x27;s unverified payload: {&#x27;sub&#x27;: &#x27;mallory&#x27;, &#x27;role&#x27;: &#x27;admin&#x27;}
+If you authorize off THIS, mallory is &#x27;admin&#x27;. Catastrophe.
+
+========================================================================
+THE CORRECT FLOW — verify the signature, THEN read claims to trust
+========================================================================
+verify forged token -&gt; InvalidSignatureError: Signature verification failed (rejected)
+verify genuine token -&gt; trusted claims: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;role&#x27;: &#x27;user&#x27;, &#x27;kid_hint&#x27;: &#x27;tenant-A&#x27;}
+NOW it is safe to authorize on role=&#x27;user&#x27;.
+
+========================================================================
+RULE: verify_signature=False is for plumbing (kid/iss lookup), never
+for security decisions. Trust flows only from a verified token.
+========================================================================</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_never_trust_unverified_claims.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">04 · Never trust unverified claims — decode-without-verify is for routing only</span>
+<span class="sd">===============================================================================</span>
+
+<span class="sd">Sometimes you need to peek inside a token BEFORE you can verify it — most often</span>
+<span class="sd">to read the ``kid`` (key id) or ``iss`` so you know *which* key to fetch. PyJWT</span>
+<span class="sd">supports this via ``jwt.get_unverified_header()`` and</span>
+<span class="sd">``jwt.decode(..., options={&quot;verify_signature&quot;: False})``.</span>
+
+<span class="sd">The iron rule: **unverified claims may be used to ROUTE, never to TRUST.**</span>
+<span class="sd">An attacker can put anything in an unverified payload. Authorization decisions</span>
+<span class="sd">(is this user an admin? which tenant?) must come only from a token whose</span>
+<span class="sd">signature you have validated.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/04_never_trust_unverified_claims.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;a-strong-shared-secret-at-least-32-bytes-long!!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;kid_hint&quot;</span><span class="p">:</span> <span class="s2">&quot;tenant-A&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-2026-06&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;LEGITIMATE USE — peek at the header to choose a verification key&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;unverified header: </span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;-&gt; route: fetch signing key with kid=</span><span class="si">{</span><span class="n">header</span><span class="p">[</span><span class="s1">&#39;kid&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2"> (then verify).</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;LEGITIMATE USE — peek at unverified claims for routing only&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">unverified</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;unverified claims: </span><span class="si">{</span><span class="n">unverified</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;OK to use &#39;iss&#39;/&#39;kid&#39; to look up a key. NOT ok to trust &#39;role&#39; yet.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE DANGER — an attacker forges claims in an UNSIGNED-CHECK read&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="c1"># Attacker crafts a token we never issued; they don&#39;t know the secret.</span>
+    <span class="n">forged</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;mallory&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;admin&quot;</span><span class="p">},</span> <span class="s2">&quot;attacker-guessed-secret-32-bytes-long!!!&quot;</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">sneaky</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;attacker&#39;s unverified payload: </span><span class="si">{</span><span class="n">sneaky</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;If you authorize off THIS, mallory is &#39;admin&#39;. Catastrophe.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE CORRECT FLOW — verify the signature, THEN read claims to trust&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">forged</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: forged token verified?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;verify forged token -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2"> (rejected)&quot;</span><span class="p">)</span>
+
+    <span class="n">trusted</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;verify genuine token -&gt; trusted claims: </span><span class="si">{</span><span class="n">trusted</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;NOW it is safe to authorize on role=</span><span class="si">{</span><span class="n">trusted</span><span class="p">[</span><span class="s1">&#39;role&#39;</span><span class="p">]</span><span class="si">!r}</span><span class="s2">.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RULE: verify_signature=False is for plumbing (kid/iss lookup), never&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;for security decisions. Trust flows only from a verified token.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/04_never_trust_unverified_claims.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_expiration_is_mandatory">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Expiration Is Mandatory</b><span>05_expiration_is_mandatory.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A JWT is a <em>bearer</em> credential: whoever holds it is treated as the subject.
+If a token never expires and it leaks (logs, browser history, a proxy, a
+breach), the attacker has permanent access. There is no server-side session to
+revoke unless you build extra infrastructure.</p>
+<p>Defenses shown here:</p>
+<ol>
+<li>A token with NO <code>exp</code> validates forever — demonstrate it.</li>
+<li>Add a short-lived <code>exp</code>; an expired token is rejected with
+   <code>ExpiredSignatureError</code>.</li>
+<li>Force the issue: <code>options={"require": ["exp"]}</code> makes a missing <code>exp</code> an
+   error, so you can never accidentally mint an eternal token.</li>
+</ol>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/05_expiration_is_mandatory.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_expiration_is_mandatory.py</span></div><pre>========================================================================
+PROBLEM — a token with no `exp` is valid indefinitely
+========================================================================
+no-exp token decodes fine: {&#x27;sub&#x27;: &#x27;alice&#x27;}
+If this leaks, it grants access until you rotate the signing key.
+
+========================================================================
+FIX 1 — set a short lifetime with a timezone-aware `exp`
+========================================================================
+issued token with exp = now + 1 second
+immediately valid: {&#x27;sub&#x27;: &#x27;alice&#x27;, &#x27;iat&#x27;: 1782849925, &#x27;exp&#x27;: 1782849926}
+after expiry -&gt; ExpiredSignatureError: Signature has expired (rejected)
+
+========================================================================
+FIX 2 — REQUIRE exp so a missing one is an error, not a silent forever
+========================================================================
+require=[&#x27;exp&#x27;] on no-exp token -&gt; MissingRequiredClaimError: Token is missing the &quot;exp&quot; claim
+
+========================================================================
+GUIDANCE
+========================================================================
+- Always set `exp`. Keep access tokens SHORT (minutes), e.g. 5-15 min.
+- Use refresh tokens for longevity (see module 15).
+- Enforce with options={&#x27;require&#x27;: [&#x27;exp&#x27;]} so it can&#x27;t be forgotten.
+- Use leeway (a few seconds) only to tolerate small clock skew.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_expiration_is_mandatory.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">05 · Expiration is mandatory — tokens without `exp` live forever</span>
+<span class="sd">================================================================</span>
+
+<span class="sd">A JWT is a *bearer* credential: whoever holds it is treated as the subject.</span>
+<span class="sd">If a token never expires and it leaks (logs, browser history, a proxy, a</span>
+<span class="sd">breach), the attacker has permanent access. There is no server-side session to</span>
+<span class="sd">revoke unless you build extra infrastructure.</span>
+
+<span class="sd">Defenses shown here:</span>
+
+<span class="sd">1. A token with NO ``exp`` validates forever — demonstrate it.</span>
+<span class="sd">2. Add a short-lived ``exp``; an expired token is rejected with</span>
+<span class="sd">   ``ExpiredSignatureError``.</span>
+<span class="sd">3. Force the issue: ``options={&quot;require&quot;: [&quot;exp&quot;]}`` makes a missing ``exp`` an</span>
+<span class="sd">   error, so you can never accidentally mint an eternal token.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/05_expiration_is_mandatory.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;a-strong-shared-secret-at-least-32-bytes-long!!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">now</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;PROBLEM — a token with no `exp` is valid indefinitely&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">eternal</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">eternal</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no-exp token decodes fine: </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;If this leaks, it grants access until you rotate the signing key.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FIX 1 — set a short lifetime with a timezone-aware `exp`&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">short</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span> <span class="s2">&quot;iat&quot;</span><span class="p">:</span> <span class="n">now</span><span class="p">,</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span> <span class="n">now</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">1</span><span class="p">)},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;issued token with exp = now + 1 second&quot;</span><span class="p">)</span>
+    <span class="n">fresh</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">short</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;immediately valid: </span><span class="si">{</span><span class="n">fresh</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Wait for it to expire, then prove PyJWT rejects it.</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">1.2</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">short</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: expired token still valid?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">ExpiredSignatureError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;after expiry -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2"> (rejected)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FIX 2 — REQUIRE exp so a missing one is an error, not a silent forever&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span>
+            <span class="n">eternal</span><span class="p">,</span>
+            <span class="n">SECRET</span><span class="p">,</span>
+            <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">],</span>
+            <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;require&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;exp&quot;</span><span class="p">],</span> <span class="s2">&quot;verify_exp&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+        <span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;UNEXPECTED: no-exp token passed the require check?!&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">MissingRequiredClaimError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;require=[&#39;exp&#39;] on no-exp token -&gt; </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GUIDANCE&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Always set `exp`. Keep access tokens SHORT (minutes), e.g. 5-15 min.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Use refresh tokens for longevity (see module 15).&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Enforce with options={&#39;require&#39;: [&#39;exp&#39;]} so it can&#39;t be forgotten.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Use leeway (a few seconds) only to tolerate small clock skew.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/05_expiration_is_mandatory.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_secret_management">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Secret Management</b><span>06_secret_management.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>For HS256 your secret IS your security. If it is weak or leaked, anyone can mint
+valid tokens. Two rules:</p>
+<ol>
+<li><strong>Make it strong and random.</strong> Use <code>secrets.token_urlsafe()</code> to generate
+   high-entropy keys (&gt;= 32 bytes for SHA-256, per RFC 7518 §3.2). Do not use
+   dictionary words, app names, or "changeme".</li>
+<li><strong>Never hardcode it.</strong> Load from an environment variable / secrets manager so
+   the secret is not committed to source control.</li>
+</ol>
+<p>We contrast a weak secret with a strong one and reason (without actually brute
+forcing) about how astronomically harder the strong one is to guess.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/06_secret_management.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_secret_management.py</span></div><pre>========================================================================
+WEAK secret — guessable, low entropy
+========================================================================
+weak secret: &#x27;password&#x27;
+~entropy: 38 bits — in any wordlist; cracked instantly.
+An attacker who guesses this can forge ANY token you &#x27;trust&#x27;.
+
+========================================================================
+STRONG secret — generated with secrets.token_urlsafe(32)
+========================================================================
+strong secret: GBaX9kM7TP0KC1gY-7Q0uQoYKK75eYh81v9axZ1dayU
+length: 43 chars, ~256 bits of entropy.
+search space: 2^256 ~= 10^77 keys.
+Brute force is infeasible — more keys than atoms in the observable
+universe. (We do NOT brute force here; the math alone settles it.)
+
+========================================================================
+NEVER HARDCODE — load the secret from the environment
+========================================================================
+secret source: generated fallback
+token signed+verified with the runtime secret: {&#x27;sub&#x27;: &#x27;alice&#x27;}
+
+========================================================================
+CHECKLIST
+========================================================================
+- HS256 secret: &gt;= 32 random bytes via secrets.token_urlsafe(32).
+- Store in env/secret manager; never commit to git.
+- Rotate periodically and on any suspected leak.
+- Prefer asymmetric (RS256/ES256) when third parties must verify, so
+  no shared secret needs distributing at all.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_secret_management.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">06 · Secret management — strong secrets, never hardcoded</span>
+<span class="sd">========================================================</span>
+
+<span class="sd">For HS256 your secret IS your security. If it is weak or leaked, anyone can mint</span>
+<span class="sd">valid tokens. Two rules:</span>
+
+<span class="sd">1. **Make it strong and random.** Use ``secrets.token_urlsafe()`` to generate</span>
+<span class="sd">   high-entropy keys (&gt;= 32 bytes for SHA-256, per RFC 7518 §3.2). Do not use</span>
+<span class="sd">   dictionary words, app names, or &quot;changeme&quot;.</span>
+<span class="sd">2. **Never hardcode it.** Load from an environment variable / secrets manager so</span>
+<span class="sd">   the secret is not committed to source control.</span>
+
+<span class="sd">We contrast a weak secret with a strong one and reason (without actually brute</span>
+<span class="sd">forcing) about how astronomically harder the strong one is to guess.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/06_secret_management.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">secrets</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">entropy_bits</span><span class="p">(</span><span class="n">num_chars</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">alphabet_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rough Shannon entropy in bits for a random string of given length.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">num_chars</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">alphabet_size</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;WEAK secret — guessable, low entropy&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">weak</span> <span class="o">=</span> <span class="s2">&quot;password&quot;</span>  <span class="c1"># the kind of thing that ends up in real code, sadly</span>
+    <span class="n">weak_bits</span> <span class="o">=</span> <span class="n">entropy_bits</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">weak</span><span class="p">),</span> <span class="mi">26</span><span class="p">)</span>  <span class="c1"># pretend lowercase only</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;weak secret: </span><span class="si">{</span><span class="n">weak</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;~entropy: </span><span class="si">{</span><span class="n">weak_bits</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> bits — in any wordlist; cracked instantly.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;An attacker who guesses this can forge ANY token you &#39;trust&#39;.</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;STRONG secret — generated with secrets.token_urlsafe(32)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">strong</span> <span class="o">=</span> <span class="n">secrets</span><span class="o">.</span><span class="n">token_urlsafe</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>  <span class="c1"># 32 random bytes -&gt; ~43 url-safe chars</span>
+    <span class="n">strong_bits</span> <span class="o">=</span> <span class="mi">32</span> <span class="o">*</span> <span class="mi">8</span>  <span class="c1"># 32 bytes of entropy</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;strong secret: </span><span class="si">{</span><span class="n">strong</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;length: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">strong</span><span class="p">)</span><span class="si">}</span><span class="s2"> chars, ~</span><span class="si">{</span><span class="n">strong_bits</span><span class="si">}</span><span class="s2"> bits of entropy.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;search space: 2^</span><span class="si">{</span><span class="n">strong_bits</span><span class="si">}</span><span class="s2"> ~= 10^</span><span class="si">{</span><span class="n">strong_bits</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.301</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> keys.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Brute force is infeasible — more keys than atoms in the observable&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;universe. (We do NOT brute force here; the math alone settles it.)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;NEVER HARDCODE — load the secret from the environment&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="c1"># In production: os.environ[&quot;JWT_SECRET&quot;], a vault, or a managed KMS.</span>
+    <span class="c1"># We fall back to the generated value so this demo is self-contained.</span>
+    <span class="n">runtime_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;JWT_SECRET&quot;</span><span class="p">,</span> <span class="n">strong</span><span class="p">)</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="s2">&quot;env var JWT_SECRET&quot;</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;JWT_SECRET&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;generated fallback&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;secret source: </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">runtime_secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="n">decoded</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">runtime_secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token signed+verified with the runtime secret: </span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CHECKLIST&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- HS256 secret: &gt;= 32 random bytes via secrets.token_urlsafe(32).&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Store in env/secret manager; never commit to git.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Rotate periodically and on any suspected leak.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Prefer asymmetric (RS256/ES256) when third parties must verify, so&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  no shared secret needs distributing at all.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/06_secret_management.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-07_dont_put_secrets_in_payload">
+  <summary>
+    <span class="ix">07</span>
+    <span class="meta"><b>Dont Put Secrets In Payload</b><span>07_dont_put_secrets_in_payload.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>The #1 misconception about JWTs: that the payload is "hidden". It is NOT. The
+payload is merely base64url-encoded — trivially reversible by anyone, with no
+key whatsoever. Signing protects <em>integrity</em>, not <em>confidentiality</em>.</p>
+<p>This script plays an eavesdropper who never has any key, yet reads a "password"
+and other sensitive claims straight out of an intercepted token.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/07_dont_put_secrets_in_payload.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-6">▶ Output</button>
+        <button class="tab" data-pane="code-6">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-6">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-6">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 07_dont_put_secrets_in_payload.py</span></div><pre>========================================================================
+A developer foolishly stuffs sensitive data into the payload
+========================================================================
+token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInBhc3N3b3JkIjoiaHVudGVyMiIsInNzbiI6IjEyMy00NS02Nzg5IiwiY3JlZGl0X2NhcmQiOiI0MTExMTExMTExMTExMTExIn0.QKsanQH6WVY2sOwxvGfphAYTko-Jq5zv3yTSCMFMXAY
+
+========================================================================
+An eavesdropper with NO KEY reads it all
+========================================================================
+attacker recovered claims without any key:
+  sub: alice
+  password: hunter2  &lt;-- SENSITIVE!
+  ssn: 123-45-6789  &lt;-- SENSITIVE!
+  credit_card: 4111111111111111  &lt;-- SENSITIVE!
+
+same via jwt.decode(verify_signature=False): keys=[&#x27;sub&#x27;, &#x27;password&#x27;, &#x27;ssn&#x27;, &#x27;credit_card&#x27;]
+
+========================================================================
+THE LESSON
+========================================================================
+- Signing != encryption. Anyone can read a JWT payload.
+- Put ONLY non-sensitive identifiers/claims in the payload.
+- Keep secrets server-side; reference them by id if needed.
+- If you truly need confidentiality, use JWE (encrypted tokens),
+  or transmit the data over TLS out-of-band — not in a JWS payload.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">07_dont_put_secrets_in_payload.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">07 · Don&#39;t put secrets in the payload — JWTs are signed, not encrypted</span>
+<span class="sd">======================================================================</span>
+
+<span class="sd">The #1 misconception about JWTs: that the payload is &quot;hidden&quot;. It is NOT. The</span>
+<span class="sd">payload is merely base64url-encoded — trivially reversible by anyone, with no</span>
+<span class="sd">key whatsoever. Signing protects *integrity*, not *confidentiality*.</span>
+
+<span class="sd">This script plays an eavesdropper who never has any key, yet reads a &quot;password&quot;</span>
+<span class="sd">and other sensitive claims straight out of an intercepted token.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/07_dont_put_secrets_in_payload.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">base64</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;a-strong-shared-secret-at-least-32-bytes-long!!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decode_payload_no_key</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the payload with NO key and NO verification — pure base64url.&quot;&quot;&quot;</span>
+    <span class="n">payload_seg</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">payload_seg</span> <span class="o">+=</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">payload_seg</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1"># restore base64 padding</span>
+    <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">base64</span><span class="o">.</span><span class="n">urlsafe_b64decode</span><span class="p">(</span><span class="n">payload_seg</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;A developer foolishly stuffs sensitive data into the payload&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;password&quot;</span><span class="p">:</span> <span class="s2">&quot;hunter2&quot;</span><span class="p">,</span>  <span class="c1"># NEVER do this</span>
+            <span class="s2">&quot;ssn&quot;</span><span class="p">:</span> <span class="s2">&quot;123-45-6789&quot;</span><span class="p">,</span>  <span class="c1"># NEVER do this</span>
+            <span class="s2">&quot;credit_card&quot;</span><span class="p">:</span> <span class="s2">&quot;4111111111111111&quot;</span><span class="p">,</span>  <span class="c1"># NEVER do this</span>
+        <span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;token: </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;An eavesdropper with NO KEY reads it all&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="c1"># No secret, no public key, no verification — just base64 decoding.</span>
+    <span class="n">leaked</span> <span class="o">=</span> <span class="n">decode_payload_no_key</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;attacker recovered claims without any key:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">leaked</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">marker</span> <span class="o">=</span> <span class="s2">&quot;  &lt;-- SENSITIVE!&quot;</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;password&quot;</span><span class="p">,</span> <span class="s2">&quot;ssn&quot;</span><span class="p">,</span> <span class="s2">&quot;credit_card&quot;</span><span class="p">}</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">v</span><span class="si">}{</span><span class="n">marker</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># PyJWT itself will read claims without verification too.</span>
+    <span class="n">same</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;verify_signature&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">same via jwt.decode(verify_signature=False): keys=</span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">same</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;THE LESSON&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Signing != encryption. Anyone can read a JWT payload.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Put ONLY non-sensitive identifiers/claims in the payload.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Keep secrets server-side; reference them by id if needed.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- If you truly need confidentiality, use JWE (encrypted tokens),&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  or transmit the data over TLS out-of-band — not in a JWS payload.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-6">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/07_dont_put_secrets_in_payload.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-08_security_checklist">
+  <summary>
+    <span class="ix">08</span>
+    <span class="meta"><b>Security Checklist</b><span>08_security_checklist.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>A consolidated, actionable checklist distilled from this whole module. Pin it
+to your wall, paste it into your code review template, and run through it for
+every service that issues or validates JWTs.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/14-security-best-practices/08_security_checklist.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-7">▶ Output</button>
+        <button class="tab" data-pane="code-7">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-7">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-7">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 08_security_checklist.py</span></div><pre>========================================================================
+✅  JWT SECURITY CHECKLIST
+========================================================================
+
+▶ Algorithm safety
+------------------------------------------------------------------------
+  [ ] Always pass algorithms=[...] to jwt.decode — pin the EXACT alg(s).
+  [ ] Never read &#x27;alg&#x27; from the token header and feed it back to decode.
+  [ ] Never allow &#x27;none&#x27; for tokens from untrusted sources.
+  [ ] Never mix symmetric (HS*) and asymmetric (RS*/ES*) in one allow-list.
+
+▶ Claim validation
+------------------------------------------------------------------------
+  [ ] Verify exp (and require it): options={&#x27;require&#x27;: [&#x27;exp&#x27;]}.
+  [ ] Verify aud — pass audience=... so tokens for other apps are rejected.
+  [ ] Verify iss — pass issuer=... to bind tokens to your trusted issuer.
+  [ ] Validate nbf/iat; allow small leeway only for clock skew.
+  [ ] Require the claims you depend on (sub, aud, iss, exp).
+
+▶ Keys &amp; secrets
+------------------------------------------------------------------------
+  [ ] HS256 secret &gt;= 32 random bytes (secrets.token_urlsafe(32)).
+  [ ] Never hardcode secrets; load from env / secret manager / KMS.
+  [ ] Rotate signing keys regularly and on any suspected compromise.
+  [ ] Prefer asymmetric (RS256/ES256/EdDSA) when 3rd parties must verify.
+  [ ] Validate &#x27;kid&#x27; against an ALLOWLIST of known keys (no arbitrary fetch).
+
+▶ Token lifecycle
+------------------------------------------------------------------------
+  [ ] Keep access tokens short-lived (minutes); use refresh tokens for length.
+  [ ] Treat JWTs as bearer credentials — always transmit over TLS only.
+  [ ] Have a revocation strategy (short TTL, denylist, or key rotation).
+
+▶ Data hygiene
+------------------------------------------------------------------------
+  [ ] Never put secrets/PII in the payload — it is readable by anyone.
+  [ ] Signing protects integrity, NOT confidentiality. Use JWE if you must.
+  [ ] Use constant-time comparisons for any custom token checks.
+
+▶ Operational
+------------------------------------------------------------------------
+  [ ] Pin your JWT library version; track its CVEs.
+  [ ] Fail closed: on any validation error, deny access.
+  [ ] Log verification failures (without logging the token&#x27;s secrets).
+
+========================================================================
+23 checks across 6 categories.
+Golden rule: PIN THE ALGORITHM, VERIFY THE CLAIMS, GUARD THE KEYS.
+========================================================================</pre></div>
+      </div>
+      <div class="pane" data-pane="code-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">08_security_checklist.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">08 · The JWT security checklist</span>
+<span class="sd">================================</span>
+
+<span class="sd">A consolidated, actionable checklist distilled from this whole module. Pin it</span>
+<span class="sd">to your wall, paste it into your code review template, and run through it for</span>
+<span class="sd">every service that issues or validates JWTs.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/14-security-best-practices/08_security_checklist.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+
+<span class="n">CHECKLIST</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Algorithm safety&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;Always pass algorithms=[...] to jwt.decode — pin the EXACT alg(s).&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Never read &#39;alg&#39; from the token header and feed it back to decode.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Never allow &#39;none&#39; for tokens from untrusted sources.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Never mix symmetric (HS*) and asymmetric (RS*/ES*) in one allow-list.&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;Claim validation&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;Verify exp (and require it): options={&#39;require&#39;: [&#39;exp&#39;]}.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Verify aud — pass audience=... so tokens for other apps are rejected.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Verify iss — pass issuer=... to bind tokens to your trusted issuer.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Validate nbf/iat; allow small leeway only for clock skew.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Require the claims you depend on (sub, aud, iss, exp).&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;Keys &amp; secrets&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;HS256 secret &gt;= 32 random bytes (secrets.token_urlsafe(32)).&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Never hardcode secrets; load from env / secret manager / KMS.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Rotate signing keys regularly and on any suspected compromise.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Prefer asymmetric (RS256/ES256/EdDSA) when 3rd parties must verify.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Validate &#39;kid&#39; against an ALLOWLIST of known keys (no arbitrary fetch).&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;Token lifecycle&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;Keep access tokens short-lived (minutes); use refresh tokens for length.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Treat JWTs as bearer credentials — always transmit over TLS only.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Have a revocation strategy (short TTL, denylist, or key rotation).&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;Data hygiene&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;Never put secrets/PII in the payload — it is readable by anyone.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Signing protects integrity, NOT confidentiality. Use JWE if you must.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Use constant-time comparisons for any custom token checks.&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;Operational&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="s2">&quot;Pin your JWT library version; track its CVEs.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Fail closed: on any validation error, deny access.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Log verification failures (without logging the token&#39;s secrets).&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅  JWT SECURITY CHECKLIST&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="n">total</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">items</span> <span class="ow">in</span> <span class="n">CHECKLIST</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">▶ </span><span class="si">{</span><span class="n">section</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">items</span><span class="p">:</span>
+            <span class="n">total</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [ ] </span><span class="si">{</span><span class="n">item</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> checks across </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">CHECKLIST</span><span class="p">)</span><span class="si">}</span><span class="s2"> categories.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Golden rule: PIN THE ALGORITHM, VERIFY THE CLAIMS, GUARD THE KEYS.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-7">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/14-security-best-practices/08_security_checklist.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="13-cryptography-deep-dive.html"><div class="dir">← Previous</div><div class="ttl">13 · Module 13 · Cryptography Deep Dive</div></a><a class="next" href="15-real-world-fastapi-oauth.html"><div class="dir">Next →</div><div class="ttl">15 · Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>

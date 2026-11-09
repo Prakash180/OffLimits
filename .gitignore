@@ -1,0 +1,7 @@
+panel-aggregationengine/
+build/
+.gradle/
+*.iml
+.idea/
+__pycache__/
+.venv/

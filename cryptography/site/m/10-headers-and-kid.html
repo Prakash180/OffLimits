@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module 10 · Headers &amp; kid · PyJWT Codex</title>
+<meta name="description" content="An interactive, end-to-end course on JSON Web Tokens and the cryptography behind PyJWT.">
+<link rel="icon" href="../assets/svg/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/pygments.css">
+<link rel="stylesheet" href="../assets/css/styles.css">
+</head>
+<body>
+<div class="bg-canvas"></div>
+<canvas id="stars"></canvas>
+<div class="layout"><aside class="sidebar">
+  <a class="brand" href="../index.html">
+    <img src="../assets/svg/logo.svg" alt="logo">
+    <span style="line-height:1.1"><b>PyJWT Codex</b><span>Interactive course</span></span>
+  </a>
+  <nav class="nav">
+    <a href="../index.html"><span class="num">⌂</span>Home</a>
+    <a href="../playground.html"><span class="num">▶</span>Playground</a>
+    <div class="nav-group-title">Modules</div>
+    <a href="../m/01-foundations.html"><span class="num">01</span>Module 01 · Foundations — What a JWT actually is</a>
+<a href="../m/02-getting-started-hs256.html"><span class="num">02</span>Module 02 · Getting Started with HS256</a>
+<a href="../m/03-registered-claims.html"><span class="num">03</span>Module 03 · Registered Claims</a>
+<a href="../m/04-custom-claims-and-validation.html"><span class="num">04</span>Module 04 · Custom Claims &amp; Validation Options</a>
+<a href="../m/05-hmac-algorithms.html"><span class="num">05</span>Module 05 — HMAC Algorithms (HS256 / HS384 / HS512)</a>
+<a href="../m/06-rsa-algorithms.html"><span class="num">06</span>Module 06 — RSA Algorithms (RS256 / RS384 / RS512)</a>
+<a href="../m/07-ecdsa-algorithms.html"><span class="num">07</span>Module 07 · ECDSA Algorithms (ES256 / ES384 / ES512 / ES256K)</a>
+<a href="../m/08-rsa-pss-algorithms.html"><span class="num">08</span>Module 08 · RSA-PSS Algorithms (PS256 / PS384 / PS512)</a>
+<a href="../m/09-eddsa-algorithms.html"><span class="num">09</span>Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</a>
+<a href="../m/10-headers-and-kid.html" class="active"><span class="num">10</span>Module 10 · Headers &amp; kid</a>
+<a href="../m/11-jwks-and-key-rotation.html"><span class="num">11</span>Module 11 · JWKS &amp; Key Rotation</a>
+<a href="../m/12-validation-errors-and-leeway.html"><span class="num">12</span>Module 12 · Validation, Errors &amp; Leeway</a>
+<a href="../m/13-cryptography-deep-dive.html"><span class="num">13</span>Module 13 · Cryptography Deep Dive</a>
+<a href="../m/14-security-best-practices.html"><span class="num">14</span>Module 14 · Security Best Practices</a>
+<a href="../m/15-real-world-fastapi-oauth.html"><span class="num">15</span>Module 15 · Real-World FastAPI &amp; OAuth2 / OIDC</a>
+<a href="../m/16-local-identity-provider.html"><span class="num">16</span>Module 16 · Build Your Own Local Identity Provider</a>
+  </nav>
+</aside><main class="content"><div class="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <button class="menu-btn" aria-label="menu">☰</button>
+    <div class="crumb"><a href="../index.html">Home</a> &nbsp;/&nbsp; <b>10 · Module 10 · Headers &amp; kid</b></div>
+  </div>
+  <a class="crumb" href="https://pyjwt.readthedocs.io/" target="_blank" rel="noopener">PyJWT 2.13 ↗</a>
+  <div class="progress-rail"><div class="progress-bar"></div></div>
+</div><div class="container">
+<style>:root{--accent:linear-gradient(90deg,#a78bfa,#7c3aed)}</style>
+<section class="hero" style="padding-bottom:8px">
+  <span class="eyebrow" style="color:#a78bfa;border-color:#a78bfa55;background:#a78bfa11">Module 10</span>
+  <h1 style="margin-top:18px">Module 10 · Headers &amp; kid</h1>
+</section>
+<section class="mental reveal"><h2 id="mental-model-behind-the-scenes">🧠 Mental Model — Behind the Scenes</h2>
+<p>A JWT is three base64url segments — <code>header.payload.signature</code> — and the <strong>first</strong> one, the <strong>JOSE header</strong>, is the verifier's instruction sheet. It's a small JSON object that answers, <em>"how do I process this token before I trust anything in it?"</em> The two parameters that carry the weight are <strong><code>alg</code></strong> (which algorithm signed it — <code>HS256</code>, <code>RS256</code>, …) and <strong><code>kid</code></strong> (a <em>key identifier</em> string naming <em>which</em> key signed it). Other parameters you'll meet are <code>typ</code> (the media type of the whole token, e.g. <code>JWT</code> or <code>at+jwt</code>) and <code>cty</code> (the media type of the <em>payload</em>, used mainly for nested JWTs).</p>
+<p>Here's the subtle, important part: to verify a token you need to know which key to verify <em>with</em> — but that information lives in the header, which you haven't verified yet. So there's an unavoidable bootstrap step. <code>jwt.get_unverified_header(token)</code> simply <strong>base64url-decodes the first segment</strong> without touching the signature or any key. That gives you <code>alg</code> and <code>kid</code> <em>before</em> verification. You then use <code>kid</code> to look up the right key in your keystore, and <em>only then</em> call <code>jwt.decode</code> to do the real, signature-checked validation. The golden rule: the unverified header is <strong>attacker-controlled data</strong>, safe to use only for <strong>key selection</strong>, never for an authorization or trust decision.</p>
+<p>This <code>kid → look up key → verify</code> pattern is the entire conceptual foundation of <strong>JWKS</strong> (Module 11). A real identity provider holds <em>many</em> keys at once — for rotation, for multiple environments — and publishes their public halves as a JWKS document. The verifier reads <code>kid</code> from each incoming token, finds the matching key in its cached copy of that document, and verifies. Swap the in-memory <code>{kid: key}</code> dict in this module's scripts for "a JSON document fetched over HTTPS and cached," and you've literally built what <code>PyJWKClient</code> does. The mechanics are identical — only the <em>source</em> of the keys changes.</p>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    A[Token arrives] --&gt; B[get_unverified_header]
+    B --&gt; C{Read kid + alg}
+    C --&gt; D[Look up key in keystore]
+    D --&gt; E[&quot;jwt.decode(token, key, algorithms=[whitelist])&quot;]
+    E --&gt; F{Signature valid?}
+    F -- yes --&gt; G[Trusted claims]
+    F -- no --&gt; H[InvalidSignatureError]</div></div>
+<h3 id="a-concrete-analogy">🔍 A concrete analogy</h3>
+<p>The header is the <strong>address and routing line on an envelope</strong>. The postal sorter reads "destination: branch 5" <em>before</em> opening anything, and uses it only to route the letter to the right desk — never as proof the letter is genuine. The <code>kid</code> is that routing label: it tells the verifier which key (which "desk") should examine the contents, but the contents aren't trusted until the signature inside is actually checked.</p>
+<h3 id="what-actually-happens-when-you-run-the-code">⚙️ What actually happens when you run the code</h3>
+<ol>
+<li>The issuer keeps a keystore — a <code>{kid: key}</code> map of several active keys.</li>
+<li>When signing, it picks one key and stamps that key's <code>kid</code> into the header via <code>headers={"kid": kid}</code>; PyJWT adds <code>alg</code> automatically.</li>
+<li>A token arrives at the verifier; <code>jwt.get_unverified_header(token)</code> base64url-decodes the first segment — <strong>no signature check, no key needed</strong>.</li>
+<li>The verifier reads <code>kid</code> and looks it up in its own keystore; an unknown <code>kid</code> is rejected immediately (<code>InvalidKeyError</code>).</li>
+<li>With the resolved key, <code>jwt.decode(token, key, algorithms=ALLOWED_ALGS)</code> performs the full, signature-checked validation against a <strong>fixed</strong> algorithm whitelist.</li>
+<li>A valid signature returns the claims; tampering or a wrong key raises <code>InvalidSignatureError</code>.</li>
+</ol>
+<h3 id="what-to-notice-when-you-run-the-examples">👀 What to notice when you run the examples</h3>
+<ul>
+<li>In <code>01_default_header.py</code>, the header is <code>{"alg":"HS256","typ":"JWT"}</code> even though you never set <code>typ</code> or <code>alg</code> — PyJWT supplies them.</li>
+<li>In <code>04_get_unverified_header.py</code>, you read <code>alg</code>/<code>kid</code> with <strong>no key at all</strong> — a vivid reminder the header is unauthenticated.</li>
+<li>In <code>06_header_drives_key_selection.py</code>, two tokens signed under different <code>kid</code>s each route to the correct secret and verify cleanly.</li>
+<li>In that same script, a token with <code>kid: "ghost"</code> is rejected with <code>InvalidKeyError</code> <em>before</em> any signature math runs — selection fails fast.</li>
+<li>In <code>05_typ_and_cty.py</code>, notice <code>typ</code> describes the <em>envelope</em> (<code>at+jwt</code>) while <code>cty</code> describes the <em>payload</em> (nested JWTs).</li>
+</ul>
+<h3 id="common-misconceptions">⚠️ Common misconceptions</h3>
+<ul>
+<li><strong>"The header is verified, so I can trust <code>kid</code>/<code>alg</code>."</strong> It is <strong>not</strong> verified by <code>get_unverified_header</code>. Use it only to <em>select</em> a key.</li>
+<li><strong>"Just pass the token's own <code>alg</code> into <code>decode</code>."</strong> That enables algorithm-confusion attacks (Module 14). Always pin a fixed <code>algorithms=[...]</code> whitelist.</li>
+<li><strong>"<code>kid</code> is optional trivia."</strong> The moment you have more than one key, <code>kid</code> is the linchpin of verification — add it from day one.</li>
+<li><strong>"<code>typ</code> and <code>cty</code> are the same thing."</strong> <code>typ</code> is the token's media type; <code>cty</code> is the <em>payload's</em> media type, used chiefly for nested JWTs.</li>
+</ul></section>
+<section class="prose reveal"><h1 id="module-10-headers-kid">🪪 Module 10 · Headers &amp; <code>kid</code></h1>
+<blockquote>
+<p>The <strong>payload</strong> gets all the attention, but the tiny JSON object at the <em>front</em>
+of every JWT — the <strong>JOSE header</strong> — is what makes multi-key systems, key
+rotation, and JWKS possible. This module is all about that header.</p>
+</blockquote>
+<hr />
+<h2 id="the-big-idea">🧠 The big idea</h2>
+<p>A JWT is <code>header.payload.signature</code>. The header answers a single question for the
+verifier: <strong>"how do I process this token?"</strong> Two parameters carry most of the
+weight:</p>
+<ul>
+<li><strong><code>alg</code></strong> — <em>which algorithm</em> signed it (<code>HS256</code>, <code>RS256</code>, …).</li>
+<li><strong><code>kid</code></strong> — <em>which key</em> signed it, so the verifier can pick the right one from
+  a set of many.</li>
+</ul>
+<p>Once a service has more than one signing key (which every real service
+eventually does), <code>kid</code> stops being optional trivia and becomes the linchpin of
+verification. The pattern you learn here — <em>read <code>kid</code> from the unverified
+header, look up the key, then verify</em> — is <strong>exactly</strong> how JWKS works in
+module 11.</p>
+<hr />
+<h2 id="how-header-driven-key-selection-works">🔄 How header-driven key selection works</h2>
+<div class="mermaid-wrap reveal"><div class="mermaid">flowchart LR
+    A[Token arrives] --&gt; B[get_unverified_header]
+    B --&gt; C{Read kid}
+    C --&gt; D[Look up key in keystore]
+    D --&gt; E[jwt.decode with that key + alg whitelist]
+    E --&gt; F{Signature valid?}
+    F -- yes --&gt; G[✅ Trusted claims]
+    F -- no --&gt; H[❌ InvalidSignatureError]</div></div>
+<p>The key insight: you <strong>must</strong> read the header <em>before</em> you can verify, because
+the header tells you which key to verify <em>with</em>. That read is unverified — so you
+use it only to <strong>select a key</strong>, never to make a trust decision.</p>
+<hr />
+<h2 id="scripts-in-this-module">📜 Scripts in this module</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Script</th>
+<th>What it teaches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><a href="#ex-01_default_header"><code>01_default_header.py</code></a></td>
+<td>The default header <code>{"alg":"HS256","typ":"JWT"}</code> via <code>get_unverified_header</code></td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="#ex-02_custom_headers"><code>02_custom_headers.py</code></a></td>
+<td>Adding <code>kid</code>, <code>cty</code>, and custom params with <code>headers=</code></td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="#ex-03_kid_key_id"><code>03_kid_key_id.py</code></a></td>
+<td>Selecting the right secret from a <code>{kid: key}</code> keystore</td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="#ex-04_get_unverified_header"><code>04_get_unverified_header.py</code></a></td>
+<td>Reading <code>alg</code>/<code>kid</code> <strong>before</strong> verifying — and why it's UNTRUSTED</td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="#ex-05_typ_and_cty"><code>05_typ_and_cty.py</code></a></td>
+<td><code>typ</code> (envelope type, e.g. <code>at+jwt</code>) vs. <code>cty</code> (payload type)</td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="#ex-06_header_drives_key_selection"><code>06_header_drives_key_selection.py</code></a></td>
+<td>The full <code>kid → key → decode</code> pattern — the foundation of JWKS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="run-them">▶️ Run them</h3>
+<div class="codehl"><pre><span></span><code><span class="c1"># from the repo root: /home/astro/catalyst/jwt-test</span>
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/01_default_header.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/02_custom_headers.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/03_kid_key_id.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/04_get_unverified_header.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/05_typ_and_cty.py
+.venv/bin/python<span class="w"> </span>pyjwt-course/10-headers-and-kid/06_header_drives_key_selection.py
+</code></pre></div>
+
+<hr />
+<h2 id="common-header-parameters">🗝️ Common header parameters</h2>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Meaning</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>alg</code></td>
+<td>Signing algorithm (PyJWT sets this for you)</td>
+<td><code>HS256</code>, <code>RS256</code></td>
+</tr>
+<tr>
+<td><code>typ</code></td>
+<td>Media type of the <strong>token</strong></td>
+<td><code>JWT</code>, <code>at+jwt</code></td>
+</tr>
+<tr>
+<td><code>cty</code></td>
+<td>Media type of the <strong>payload</strong></td>
+<td><code>JWT</code> (nested), <code>application/json</code></td>
+</tr>
+<tr>
+<td><code>kid</code></td>
+<td>Key identifier for verification-key lookup</td>
+<td><code>key-1</code>, <code>2025-key</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="key-takeaways">✅ Key takeaways</h2>
+<ul>
+<li><code>jwt.encode(..., headers={...})</code> adds custom header params; PyJWT always
+  supplies <code>alg</code> itself, so don't put <code>alg</code> in <code>headers=</code>.</li>
+<li><code>jwt.get_unverified_header(token)</code> decodes the header <strong>without</strong> the key and
+  <strong>without</strong> checking the signature — use it purely to choose a verification key.</li>
+<li><code>kid</code> lets one verifier hold many keys and pick the correct one per token.</li>
+<li><code>typ</code> describes the envelope (use explicit types like <code>at+jwt</code> defensively);
+  <code>cty</code> describes the payload (mainly for nested JWTs).</li>
+<li>The <code>kid → key → decode</code> flow is the conceptual core of JWKS (module 11).</li>
+</ul>
+<h2 id="pitfalls">⚠️ Pitfalls</h2>
+<ul>
+<li><strong>Trusting unverified data.</strong> The header (and unverified payload) are
+  attacker-controlled. Only use them to <em>select a key</em>, never to authorize.</li>
+<li><strong>Echoing <code>alg</code> back into <code>decode</code>.</strong> Always pass a fixed, trusted
+  <code>algorithms=[...]</code> whitelist. Feeding the token's own <code>alg</code> into <code>decode</code>
+  enables algorithm-confusion attacks (module 14).</li>
+<li><strong>Forgetting <code>kid</code> exists until rotation.</strong> Add <code>kid</code> from day one; retrofitting
+  it during an incident is painful.</li>
+<li><strong>Assuming a missing <code>kid</code> is fine.</strong> Decide explicitly how to handle tokens
+  with no <code>kid</code> (reject, or fall back to a default key).</li>
+</ul></section>
+<h2 id="examples">🧪 Hands-on examples <span style="color:var(--faint);font-size:1rem;font-weight:500">· 6 runnable scripts</span></h2>
+<p style="color:var(--muted)">Every script below was executed locally with <code>uv run</code>; the
+<b>Output</b> tab shows its real, captured result. Open the <b>Code</b> tab to read the
+fully-commented source.</p>
+
+<details class="example reveal" id="ex-01_default_header" open>
+  <summary>
+    <span class="ix">01</span>
+    <span class="meta"><b>Default Header</b><span>01_default_header.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>01 · The default JOSE header.</p>
+<p>Every JWT begins with a <em>header</em> — a small JSON object, base64url-encoded, that
+tells a verifier <strong>how</strong> to process the token. When you call <code>jwt.encode()</code>
+without specifying any extra headers, PyJWT writes a minimal default:</p>
+<div class="codehl"><pre><span></span><code>{&quot;alg&quot;: &quot;HS256&quot;, &quot;typ&quot;: &quot;JWT&quot;}
+</code></pre></div>
+
+<ul>
+<li><code>alg</code> — the signing algorithm. PyJWT <em>requires</em> this and uses it (after you
+  whitelist it in <code>decode(algorithms=[...])</code>) to know how to verify.</li>
+<li><code>typ</code> — the media type of the token itself. <code>"JWT"</code> is the conventional
+  default.</li>
+</ul>
+<p>This script signs a token and reads the header back with
+<code>jwt.get_unverified_header</code> — which decodes the header <strong>without</strong> checking the
+signature (perfectly safe here, the header is public anyway).</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/01_default_header.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-0">▶ Output</button>
+        <button class="tab" data-pane="code-0">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-0">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-0">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 01_default_header.py</span></div><pre>Encoded token:
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzb21lIjoicGF5bG9hZCJ9.0Mn9OYeTizIcjl_d4qNbBWOy6oF9bR7P4cY3nlmBjas
+
+Default header (decoded):
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;
+}
+
+✅ Confirmed default header: {&#x27;alg&#x27;: &#x27;HS256&#x27;, &#x27;typ&#x27;: &#x27;JWT&#x27;}</pre></div>
+      </div>
+      <div class="pane" data-pane="code-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">01_default_header.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;01 · The default JOSE header.</span>
+
+<span class="sd">Every JWT begins with a *header* — a small JSON object, base64url-encoded, that</span>
+<span class="sd">tells a verifier **how** to process the token. When you call ``jwt.encode()``</span>
+<span class="sd">without specifying any extra headers, PyJWT writes a minimal default:</span>
+
+<span class="sd">    {&quot;alg&quot;: &quot;HS256&quot;, &quot;typ&quot;: &quot;JWT&quot;}</span>
+
+<span class="sd">- ``alg`` — the signing algorithm. PyJWT *requires* this and uses it (after you</span>
+<span class="sd">  whitelist it in ``decode(algorithms=[...])``) to know how to verify.</span>
+<span class="sd">- ``typ`` — the media type of the token itself. ``&quot;JWT&quot;`` is the conventional</span>
+<span class="sd">  default.</span>
+
+<span class="sd">This script signs a token and reads the header back with</span>
+<span class="sd">``jwt.get_unverified_header`` — which decodes the header **without** checking the</span>
+<span class="sd">signature (perfectly safe here, the header is public anyway).</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/01_default_header.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Encode with NO explicit headers — PyJWT supplies the defaults.</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">({</span><span class="s2">&quot;some&quot;</span><span class="p">:</span> <span class="s2">&quot;payload&quot;</span><span class="p">},</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># get_unverified_header decodes ONLY the first segment (the header).</span>
+    <span class="c1"># It does not validate the signature — and it doesn&#39;t need the secret.</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Default header (decoded):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Prove the defaults are exactly what we expect.</span>
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="s2">&quot;alg should default to the chosen algorithm&quot;</span>
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;typ&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;JWT&quot;</span><span class="p">,</span> <span class="s2">&quot;typ should default to &#39;JWT&#39;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Confirmed default header: {&#39;alg&#39;: &#39;HS256&#39;, &#39;typ&#39;: &#39;JWT&#39;}&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-0">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/01_default_header.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-02_custom_headers">
+  <summary>
+    <span class="ix">02</span>
+    <span class="meta"><b>Custom Headers</b><span>02_custom_headers.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>02 · Custom header parameters.</p>
+<p>The default header has just <code>alg</code> and <code>typ</code>, but the JOSE spec lets you add
+<em>any</em> header parameters you like. You pass them via the <code>headers=</code> argument to
+<code>jwt.encode()</code>. The most important real-world one is <code>kid</code> (key ID), which
+tells the verifier <em>which key</em> signed the token — the foundation of JWKS and key
+rotation (covered in module 11).</p>
+<p>Other common header params shown here:
+- <code>kid</code> — key identifier, used to select a verification key.
+- <code>cty</code> — content type, describes the <em>payload's</em> media type (e.g. nested JWT).
+- a fully custom param (<code>"custom"</code>) — anything you want; verifiers ignore
+  params they don't understand.</p>
+<p>Note: PyJWT always sets <code>alg</code> itself from the <code>algorithm=</code> argument, so you
+don't (and shouldn't) put <code>alg</code> in <code>headers=</code>.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/02_custom_headers.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-1">▶ Output</button>
+        <button class="tab" data-pane="code-1">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-1">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-1">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 02_custom_headers.py</span></div><pre>Encoded token with custom headers:
+eyJhbGciOiJIUzI1NiIsImN0eSI6ImFwcGxpY2F0aW9uL2pzb24iLCJjdXN0b20iOiJ4Iiwia2lkIjoia2V5LTEiLCJ0eXAiOiJKV1QifQ.eyJzb21lIjoicGF5bG9hZCJ9.rtfpbjMemHOwIDpqlmQstbBCcjLcfUcaBmaSdAfj0ww
+
+Decoded header:
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;cty&quot;: &quot;application/json&quot;,
+  &quot;custom&quot;: &quot;x&quot;,
+  &quot;kid&quot;: &quot;key-1&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;
+}
+
+✅ Custom headers round-tripped: kid, cty, custom (+ alg, typ).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">02_custom_headers.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;02 · Custom header parameters.</span>
+
+<span class="sd">The default header has just ``alg`` and ``typ``, but the JOSE spec lets you add</span>
+<span class="sd">*any* header parameters you like. You pass them via the ``headers=`` argument to</span>
+<span class="sd">``jwt.encode()``. The most important real-world one is ``kid`` (key ID), which</span>
+<span class="sd">tells the verifier *which key* signed the token — the foundation of JWKS and key</span>
+<span class="sd">rotation (covered in module 11).</span>
+
+<span class="sd">Other common header params shown here:</span>
+<span class="sd">- ``kid`` — key identifier, used to select a verification key.</span>
+<span class="sd">- ``cty`` — content type, describes the *payload&#39;s* media type (e.g. nested JWT).</span>
+<span class="sd">- a fully custom param (``&quot;custom&quot;``) — anything you want; verifiers ignore</span>
+<span class="sd">  params they don&#39;t understand.</span>
+
+<span class="sd">Note: PyJWT always sets ``alg`` itself from the ``algorithm=`` argument, so you</span>
+<span class="sd">don&#39;t (and shouldn&#39;t) put ``alg`` in ``headers=``.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/02_custom_headers.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">custom_headers</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-1&quot;</span><span class="p">,</span>            <span class="c1"># which key signed this token</span>
+        <span class="s2">&quot;cty&quot;</span><span class="p">:</span> <span class="s2">&quot;application/json&quot;</span><span class="p">,</span>  <span class="c1"># what the payload contains</span>
+        <span class="s2">&quot;custom&quot;</span><span class="p">:</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span>             <span class="c1"># arbitrary app-specific metadata</span>
+    <span class="p">}</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;some&quot;</span><span class="p">:</span> <span class="s2">&quot;payload&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="n">custom_headers</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Encoded token with custom headers:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Read them back. PyJWT merged our custom headers with the defaults</span>
+    <span class="c1"># (alg + typ), so all five keys appear.</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Decoded header:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;key-1&quot;</span>
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;cty&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;application/json&quot;</span>
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;custom&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;x&quot;</span>
+    <span class="k">assert</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;HS256&quot;</span>  <span class="c1"># PyJWT added this automatically</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Custom headers round-tripped: kid, cty, custom (+ alg, typ).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-1">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/02_custom_headers.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-03_kid_key_id">
+  <summary>
+    <span class="ix">03</span>
+    <span class="meta"><b>KID Key ID</b><span>03_kid_key_id.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>03 · <code>kid</code> — the Key ID header.</p>
+<p>A single service often has <strong>multiple</strong> signing keys at once: an old one being
+phased out, a current one, maybe a future one. The <code>kid</code> header is how a token
+announces <em>which</em> key was used, so the verifier can pick the matching key from
+its keystore instead of guessing (or trying them all).</p>
+<p>Here we keep an in-memory keystore mapping <code>kid -&gt; secret</code>. The issuer stamps
+each token with the <code>kid</code> of the secret it used. The verifier reads that
+<code>kid</code> and looks up the correct secret. Use the wrong secret and verification
+fails — so getting the lookup right matters.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/03_kid_key_id.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-2">▶ Output</button>
+        <button class="tab" data-pane="code-2">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-2">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-2">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 03_kid_key_id.py</span></div><pre>token_a (key-1): kid=key-1 -&gt; verified claims {&#x27;user&#x27;: &#x27;alice&#x27;}
+token_b (key-2): kid=key-2 -&gt; verified claims {&#x27;user&#x27;: &#x27;bob&#x27;}
+
+Tampering demo — verify token_a with key-2&#x27;s secret:
+  ❌ InvalidSignatureError (as expected — wrong key for this token)
+
+✅ kid lets a verifier select the correct key per token.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">03_kid_key_id.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;03 · ``kid`` — the Key ID header.</span>
+
+<span class="sd">A single service often has **multiple** signing keys at once: an old one being</span>
+<span class="sd">phased out, a current one, maybe a future one. The ``kid`` header is how a token</span>
+<span class="sd">announces *which* key was used, so the verifier can pick the matching key from</span>
+<span class="sd">its keystore instead of guessing (or trying them all).</span>
+
+<span class="sd">Here we keep an in-memory keystore mapping ``kid -&gt; secret``. The issuer stamps</span>
+<span class="sd">each token with the ``kid`` of the secret it used. The verifier reads that</span>
+<span class="sd">``kid`` and looks up the correct secret. Use the wrong secret and verification</span>
+<span class="sd">fails — so getting the lookup right matters.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/03_kid_key_id.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># A keystore: each key has a name (kid) and a secret value.</span>
+<span class="n">KEYSTORE</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;key-1&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-for-key-one-padded-to-32-plus-bytes!&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;key-2&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-for-key-two-padded-to-32-plus-bytes!&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">issue</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Sign a token using the secret named by ``kid`` and stamp ``kid`` in the header.&quot;&quot;&quot;</span>
+    <span class="n">secret</span> <span class="o">=</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">verify</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the kid from the (unverified) header, pick the right secret, then verify.&quot;&quot;&quot;</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="n">secret</span> <span class="o">=</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>  <span class="c1"># the right key for THIS token</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">secret</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Issue two tokens signed with two different keys.</span>
+    <span class="n">token_a</span> <span class="o">=</span> <span class="n">issue</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;alice&quot;</span><span class="p">},</span> <span class="n">kid</span><span class="o">=</span><span class="s2">&quot;key-1&quot;</span><span class="p">)</span>
+    <span class="n">token_b</span> <span class="o">=</span> <span class="n">issue</span><span class="p">({</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;bob&quot;</span><span class="p">},</span> <span class="n">kid</span><span class="o">=</span><span class="s2">&quot;key-2&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">token</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;token_a (key-1)&quot;</span><span class="p">,</span> <span class="n">token_a</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;token_b (key-2)&quot;</span><span class="p">,</span> <span class="n">token_b</span><span class="p">)):</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">verify</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+        <span class="n">chosen_kid</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: kid=</span><span class="si">{</span><span class="n">chosen_kid</span><span class="si">}</span><span class="s2"> -&gt; verified claims </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># Show what happens if the kid points at the WRONG secret: verification fails.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Tampering demo — verify token_a with key-2&#39;s secret:&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token_a</span><span class="p">,</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="s2">&quot;key-2&quot;</span><span class="p">],</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidSignatureError</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  ❌ InvalidSignatureError (as expected — wrong key for this token)&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ kid lets a verifier select the correct key per token.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-2">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/03_kid_key_id.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-04_get_unverified_header">
+  <summary>
+    <span class="ix">04</span>
+    <span class="meta"><b>Get Unverified Header</b><span>04_get_unverified_header.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>04 · <code>get_unverified_header</code> — reading the header BEFORE you verify.</p>
+<p>This is one of the most important — and most misunderstood — functions in PyJWT.</p>
+<p>To verify a token you need the right key. But for asymmetric tokens (and any
+multi-key setup) you don't know <em>which</em> key until you read the <code>kid</code> from the
+header... which lives <em>inside the token you haven't verified yet</em>. Chicken, meet
+egg.</p>
+<p>The resolution: <code>jwt.get_unverified_header(token)</code> decodes the header segment
+<strong>without checking the signature</strong>. You use it ONLY to discover <code>alg</code> and
+<code>kid</code> so you can choose the verification key — and then you do a <em>full</em>,
+signature-checked <code>jwt.decode</code> with that key.</p>
+<p>⚠️  UNVERIFIED means UNTRUSTED. An attacker fully controls these values. Never
+make a security decision based on unverified header/claims beyond "which key
+should I try". Always whitelist algorithms in <code>decode(algorithms=[...])</code> — do
+NOT feed the header's <code>alg</code> straight back in, or you enable algorithm-confusion
+attacks (module 14).</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/04_get_unverified_header.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-3">▶ Output</button>
+        <button class="tab" data-pane="code-3">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-3">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-3">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 04_get_unverified_header.py</span></div><pre>Unverified header (do NOT trust yet):
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;kid&quot;: &quot;key-2&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;
+}
+
+Header advertises alg=&#x27;HS256&#x27;, kid=&#x27;key-2&#x27;
+✅ Verified claims (trusted): {&#x27;user&#x27;: &#x27;carol&#x27;}
+
+Remember: get_unverified_header is for KEY SELECTION only — never trust it.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">04_get_unverified_header.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;04 · ``get_unverified_header`` — reading the header BEFORE you verify.</span>
+
+<span class="sd">This is one of the most important — and most misunderstood — functions in PyJWT.</span>
+
+<span class="sd">To verify a token you need the right key. But for asymmetric tokens (and any</span>
+<span class="sd">multi-key setup) you don&#39;t know *which* key until you read the ``kid`` from the</span>
+<span class="sd">header... which lives *inside the token you haven&#39;t verified yet*. Chicken, meet</span>
+<span class="sd">egg.</span>
+
+<span class="sd">The resolution: ``jwt.get_unverified_header(token)`` decodes the header segment</span>
+<span class="sd">**without checking the signature**. You use it ONLY to discover ``alg`` and</span>
+<span class="sd">``kid`` so you can choose the verification key — and then you do a *full*,</span>
+<span class="sd">signature-checked ``jwt.decode`` with that key.</span>
+
+<span class="sd">⚠️  UNVERIFIED means UNTRUSTED. An attacker fully controls these values. Never</span>
+<span class="sd">make a security decision based on unverified header/claims beyond &quot;which key</span>
+<span class="sd">should I try&quot;. Always whitelist algorithms in ``decode(algorithms=[...])`` — do</span>
+<span class="sd">NOT feed the header&#39;s ``alg`` straight back in, or you enable algorithm-confusion</span>
+<span class="sd">attacks (module 14).</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/04_get_unverified_header.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">KEYSTORE</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;key-1&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-one-padded-to-at-least-32-bytes-long!&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;key-2&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-two-padded-to-at-least-32-bytes-long!&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">ALLOWED_ALGS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">]</span>  <span class="c1"># our trusted whitelist — fixed, never taken from the token</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;user&quot;</span><span class="p">:</span> <span class="s2">&quot;carol&quot;</span><span class="p">},</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="s2">&quot;key-2&quot;</span><span class="p">],</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;key-2&quot;</span><span class="p">}</span>
+    <span class="p">)</span>
+
+    <span class="c1"># STEP 1: peek at the header — no key, no signature check.</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Unverified header (do NOT trust yet):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="n">alg</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;alg&quot;</span><span class="p">]</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">header</span><span class="p">[</span><span class="s2">&quot;kid&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Header advertises alg=</span><span class="si">{</span><span class="n">alg</span><span class="si">!r}</span><span class="s2">, kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># STEP 2: use kid to select the key. Use our OWN whitelist for algorithms,</span>
+    <span class="c1"># not the header&#39;s alg value.</span>
+    <span class="k">if</span> <span class="n">alg</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ALLOWED_ALGS</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Refusing untrusted algorithm </span><span class="si">{</span><span class="n">alg</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>
+
+    <span class="c1"># STEP 3: NOW verify for real — this is the trusted result.</span>
+    <span class="n">verified</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="n">ALLOWED_ALGS</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ Verified claims (trusted): </span><span class="si">{</span><span class="n">verified</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Remember: get_unverified_header is for KEY SELECTION only — never trust it.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-3">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/04_get_unverified_header.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-05_typ_and_cty">
+  <summary>
+    <span class="ix">05</span>
+    <span class="meta"><b>Typ And Cty</b><span>05_typ_and_cty.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>05 · <code>typ</code> and <code>cty</code> — token type vs. content type.</p>
+<p>Two header parameters describe <em>what kind of thing</em> the token is:</p>
+<ul>
+<li>
+<p><code>typ</code> (type) — the media type of the <strong>whole JWT object</strong>. Conventionally
+  <code>"JWT"</code>. RFC 8725 / RFC 9068 recommend using an <em>explicit</em> type to prevent
+  cross-service token confusion. For OAuth2 access tokens, RFC 9068 mandates
+  <code>typ="at+jwt"</code>. Other examples: <code>"dpop+jwt"</code>, <code>"logout+jwt"</code>.</p>
+</li>
+<li>
+<p><code>cty</code> (content type) — the media type of the <strong>payload</strong>. You only need this
+  when the payload is itself something structured that a recipient must be told
+  how to interpret — most famously a <em>nested</em> JWT (a JWT whose payload is another
+  JWT), where you'd set <code>cty="JWT"</code>.</p>
+</li>
+</ul>
+<p>Rule of thumb: <code>typ</code> is about the envelope; <code>cty</code> is about the contents.</p>
+<p>This script issues an access-token-style JWT with <code>typ="at+jwt"</code> and shows a
+verifier explicitly <em>requiring</em> that type — a good defensive habit.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/05_typ_and_cty.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-4">▶ Output</button>
+        <button class="tab" data-pane="code-4">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-4">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-4">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 05_typ_and_cty.py</span></div><pre>Access token header:
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;typ&quot;: &quot;at+jwt&quot;
+}
+
+✅ typ check passed; verified access-token claims: {&#x27;sub&#x27;: &#x27;user-123&#x27;, &#x27;scope&#x27;: &#x27;read:profile&#x27;}
+
+Token declaring its payload content type (cty):
+{
+  &quot;alg&quot;: &quot;HS256&quot;,
+  &quot;cty&quot;: &quot;application/json&quot;,
+  &quot;typ&quot;: &quot;JWT&quot;
+}
+
+Takeaway: typ = type of the envelope; cty = type of the payload.</pre></div>
+      </div>
+      <div class="pane" data-pane="code-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">05_typ_and_cty.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;05 · ``typ`` and ``cty`` — token type vs. content type.</span>
+
+<span class="sd">Two header parameters describe *what kind of thing* the token is:</span>
+
+<span class="sd">- ``typ`` (type) — the media type of the **whole JWT object**. Conventionally</span>
+<span class="sd">  ``&quot;JWT&quot;``. RFC 8725 / RFC 9068 recommend using an *explicit* type to prevent</span>
+<span class="sd">  cross-service token confusion. For OAuth2 access tokens, RFC 9068 mandates</span>
+<span class="sd">  ``typ=&quot;at+jwt&quot;``. Other examples: ``&quot;dpop+jwt&quot;``, ``&quot;logout+jwt&quot;``.</span>
+
+<span class="sd">- ``cty`` (content type) — the media type of the **payload**. You only need this</span>
+<span class="sd">  when the payload is itself something structured that a recipient must be told</span>
+<span class="sd">  how to interpret — most famously a *nested* JWT (a JWT whose payload is another</span>
+<span class="sd">  JWT), where you&#39;d set ``cty=&quot;JWT&quot;``.</span>
+
+<span class="sd">Rule of thumb: ``typ`` is about the envelope; ``cty`` is about the contents.</span>
+
+<span class="sd">This script issues an access-token-style JWT with ``typ=&quot;at+jwt&quot;`` and shows a</span>
+<span class="sd">verifier explicitly *requiring* that type — a good defensive habit.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/05_typ_and_cty.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="n">SECRET</span> <span class="o">=</span> <span class="s2">&quot;teaching-secret-key-with-at-least-32-bytes!&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># An OAuth2-style access token: RFC 9068 says typ MUST be &quot;at+jwt&quot;.</span>
+    <span class="n">access_token</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;sub&quot;</span><span class="p">:</span> <span class="s2">&quot;user-123&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">:</span> <span class="s2">&quot;read:profile&quot;</span><span class="p">},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;typ&quot;</span><span class="p">:</span> <span class="s2">&quot;at+jwt&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Access token header:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">access_token</span><span class="p">),</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># A defensive verifier: only accept tokens that declare the expected type.</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">access_token</span><span class="p">)</span>
+    <span class="n">expected_typ</span> <span class="o">=</span> <span class="s2">&quot;at+jwt&quot;</span>
+    <span class="k">if</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;typ&quot;</span><span class="p">)</span> <span class="o">!=</span> <span class="n">expected_typ</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wrong token type: expected </span><span class="si">{</span><span class="n">expected_typ</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">claims</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">access_token</span><span class="p">,</span> <span class="n">SECRET</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ typ check passed; verified access-token claims: </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># cty demo: a token whose payload is described as JSON content.</span>
+    <span class="n">typed_payload</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;nested&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}},</span>
+        <span class="n">SECRET</span><span class="p">,</span>
+        <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;cty&quot;</span><span class="p">:</span> <span class="s2">&quot;application/json&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token declaring its payload content type (cty):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">typed_payload</span><span class="p">),</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Takeaway: typ = type of the envelope; cty = type of the payload.&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-4">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/05_typ_and_cty.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<details class="example reveal" id="ex-06_header_drives_key_selection">
+  <summary>
+    <span class="ix">06</span>
+    <span class="meta"><b>Header Drives Key Selection</b><span>06_header_drives_key_selection.py</span></span>
+    <span class="chev">▾</span>
+  </summary>
+  <div class="body">
+    <div class="explain"><p>06 · The header drives key selection — the foundation of JWKS.</p>
+<p>This script ties the whole module together into the pattern that every JWKS-based
+system (Auth0, Okta, Microsoft Entra ID, Google, ...) uses under the hood:</p>
+<div class="codehl"><pre><span></span><code>1. The issuer holds a KEYSTORE: {kid -&gt; key}.
+2. When signing, it picks a key and stamps that key&#39;s ``kid`` into the header.
+3. The verifier reads the ``kid`` from the *unverified* header.
+4. It looks up the matching key in its own copy of the keystore.
+5. It performs a full, signature-checked ``jwt.decode`` with that key.
+</code></pre></div>
+
+<p>Swap the in-memory dict for "a JWKS document fetched over HTTPS and cached" and
+you have exactly what <code>PyJWKClient</code> does (module 11). The mechanics are
+identical; only the <em>source</em> of the keys differs.</p>
+<p>We use HMAC secrets here to keep the focus on the selection pattern. In module 11
+the same flow runs with RSA public keys from a real JWKS.</p>
+<p>Run:
+    /home/astro/catalyst/jwt-test/.venv/bin/python         pyjwt-course/10-headers-and-kid/06_header_drives_key_selection.py</p></div>
+    <div class="tabwrap">
+      <div class="tabs">
+        <button class="tab active" data-pane="explain-5">▶ Output</button>
+        <button class="tab" data-pane="code-5">&lt;/&gt; Code</button>
+        <button class="tab" data-pane="cmd-5">$ Run</button>
+      </div>
+      <div class="pane active" data-pane="explain-5">
+        <div class="terminal"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">output · 06_header_drives_key_selection.py</span></div><pre>Keystore kids: [&#x27;2024-key&#x27;, &#x27;2025-key&#x27;]
+
+kid=2024-key: verified -&gt; {&#x27;resource&#x27;: &#x27;signed-with-2024-key&#x27;}
+kid=2025-key: verified -&gt; {&#x27;resource&#x27;: &#x27;signed-with-2025-key&#x27;}
+
+Token with unknown kid &#x27;ghost&#x27;:
+  ❌ InvalidKeyError: Unknown kid: &#x27;ghost&#x27;
+
+✅ This kid -&gt; key -&gt; decode flow IS the heart of JWKS (next module).</pre></div>
+      </div>
+      <div class="pane" data-pane="code-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">06_header_drives_key_selection.py</span><button class="copy">copy</button></div><div class="codehl"><pre><span></span><span class="sd">&quot;&quot;&quot;06 · The header drives key selection — the foundation of JWKS.</span>
+
+<span class="sd">This script ties the whole module together into the pattern that every JWKS-based</span>
+<span class="sd">system (Auth0, Okta, Microsoft Entra ID, Google, ...) uses under the hood:</span>
+
+<span class="sd">    1. The issuer holds a KEYSTORE: {kid -&gt; key}.</span>
+<span class="sd">    2. When signing, it picks a key and stamps that key&#39;s ``kid`` into the header.</span>
+<span class="sd">    3. The verifier reads the ``kid`` from the *unverified* header.</span>
+<span class="sd">    4. It looks up the matching key in its own copy of the keystore.</span>
+<span class="sd">    5. It performs a full, signature-checked ``jwt.decode`` with that key.</span>
+
+<span class="sd">Swap the in-memory dict for &quot;a JWKS document fetched over HTTPS and cached&quot; and</span>
+<span class="sd">you have exactly what ``PyJWKClient`` does (module 11). The mechanics are</span>
+<span class="sd">identical; only the *source* of the keys differs.</span>
+
+<span class="sd">We use HMAC secrets here to keep the focus on the selection pattern. In module 11</span>
+<span class="sd">the same flow runs with RSA public keys from a real JWKS.</span>
+
+<span class="sd">Run:</span>
+<span class="sd">    /home/astro/catalyst/jwt-test/.venv/bin/python \</span>
+<span class="sd">        pyjwt-course/10-headers-and-kid/06_header_drives_key_selection.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">jwt</span>
+
+<span class="c1"># The issuer&#39;s keystore — multiple active keys, each addressable by kid.</span>
+<span class="n">KEYSTORE</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;2024-key&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-from-last-year-padded-to-32-bytes-ok!&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;2025-key&quot;</span><span class="p">:</span> <span class="s2">&quot;secret-currently-in-use-padded-to-32-bytes!&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">ALLOWED_ALGS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HS256&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sign</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">kid</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Issuer side: pick the key by kid and advertise that kid in the header.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="n">kid</span><span class="p">],</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="n">kid</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">verify</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verifier side: kid -&gt; key lookup -&gt; signature-checked decode.&quot;&quot;&quot;</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">get_unverified_header</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+    <span class="n">kid</span> <span class="o">=</span> <span class="n">header</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;kid&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">kid</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidTokenError</span><span class="p">(</span><span class="s2">&quot;Token has no &#39;kid&#39; header&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">kid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">KEYSTORE</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidKeyError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown kid: </span><span class="si">{</span><span class="n">kid</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">KEYSTORE</span><span class="p">[</span><span class="n">kid</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">jwt</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">algorithms</span><span class="o">=</span><span class="n">ALLOWED_ALGS</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Keystore kids:&quot;</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">KEYSTORE</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">kid</span> <span class="ow">in</span> <span class="n">KEYSTORE</span><span class="p">:</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">sign</span><span class="p">({</span><span class="s2">&quot;resource&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;signed-with-</span><span class="si">{</span><span class="n">kid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">},</span> <span class="n">kid</span><span class="p">)</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">verify</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;kid=</span><span class="si">{</span><span class="n">kid</span><span class="si">}</span><span class="s2">: verified -&gt; </span><span class="si">{</span><span class="n">claims</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># An unknown kid (e.g. a retired or forged key id) is cleanly rejected.</span>
+    <span class="n">forged</span> <span class="o">=</span> <span class="n">jwt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span>
+        <span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span> <span class="s2">&quot;whatever-secret-padded-to-at-least-32-bytes&quot;</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">=</span><span class="s2">&quot;HS256&quot;</span><span class="p">,</span>
+        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;kid&quot;</span><span class="p">:</span> <span class="s2">&quot;ghost&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token with unknown kid &#39;ghost&#39;:&quot;</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">verify</span><span class="p">(</span><span class="n">forged</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">jwt</span><span class="o">.</span><span class="n">InvalidKeyError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ❌ </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ This kid -&gt; key -&gt; decode flow IS the heart of JWKS (next module).&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+      </div>
+      <div class="pane" data-pane="cmd-5">
+        <div class="codewin"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="fname">terminal</span><button class="copy">copy</button></div><pre><span class="seg-s">$</span> uv run python pyjwt-course/10-headers-and-kid/06_header_drives_key_selection.py</pre></div>
+      </div>
+    </div>
+  </div>
+</details>
+<nav class="pager"><a class="prev" href="09-eddsa-algorithms.html"><div class="dir">← Previous</div><div class="ttl">09 · Module 09 · EdDSA Algorithms (Ed25519 / Ed448)</div></a><a class="next" href="11-jwks-and-key-rotation.html"><div class="dir">Next →</div><div class="ttl">11 · Module 11 · JWKS &amp; Key Rotation</div></a></nav>
+<footer class="footer">The PyJWT Codex · 2026 · 16 modules · 118 verified examples · built locally with <code>uv</code>, zero npm. Tokens are <b>signed, not encrypted</b> — never put secrets in a payload.</footer></div></main></div><script src="../assets/vendor/mermaid.min.js"></script>
+<script src="../assets/vendor/lottie.min.js"></script>
+<script src="../assets/js/app.js"></script>
+</body></html>
